@@ -1,20 +1,20 @@
 #![deny(clippy::all)]
 
-use napi_derive::napi;
-
-#[cfg(all(
-  any(windows, unix),
-  target_arch = "x86_64",
-  not(target_env = "musl"),
-  not(debug_assertions)
-))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+#[macro_use]
+extern crate napi_derive;
 
 #[napi(object)]
 pub struct Device {
   pub vendor: u32,
   pub product: u32,
+}
+
+#[napi(object)]
+pub struct Version {
+  pub major: u32,
+  pub micro: u32,
+  pub minor: u32,
+  pub nano: u32,
 }
 
 #[napi]
@@ -31,4 +31,17 @@ pub fn list_devices() -> Vec<Device> {
   }
 
   vec
+}
+
+#[napi]
+fn get_version() -> Version {
+  let version = rusb::version();
+  let obj = Version {
+    major: version.major() as u32,
+    micro: version.micro() as u32,
+    minor: version.minor() as u32,
+    nano: version.nano() as u32,
+  };
+
+	obj
 }

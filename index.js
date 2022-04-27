@@ -192,6 +192,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { listDevices } = nativeBinding
+const { listDevices, getVersion } = nativeBinding
 
 module.exports.listDevices = listDevices
+module.exports.getVersion = getVersion
