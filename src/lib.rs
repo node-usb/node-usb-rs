@@ -11,7 +11,24 @@ use napi_derive::napi;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[napi(object)]
+pub struct Device {
+  pub vendor: u32,
+  pub product: u32,
+}
+
 #[napi]
-pub fn plus_100(input: u32) -> u32 {
-  input + 100
+pub fn list_devices() -> Vec<Device> {
+  let mut vec = Vec::new();
+
+  for device in rusb::devices().unwrap().iter() {
+    let device_desc = device.device_descriptor().unwrap();
+
+    vec.push(Device {
+      vendor: device_desc.vendor_id() as u32,
+      product: device_desc.product_id() as u32,
+    });
+  }
+
+  vec
 }

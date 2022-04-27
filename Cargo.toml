@@ -1,5 +1,5 @@
 [package]
-authors = ["LongYinan <lynweklm@gmail.com>"]
+authors = ["thegecko <github@thegecko.org>"]
 edition = "2021"
 name = "napi-package-template"
 version = "0.1.0"
@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = "2"
 napi-derive = "2"
+rusb = "0.9"
 
 [target.'cfg(all(any(windows, unix), target_arch = "x86_64", not(target_env = "musl")))'.dependencies]
 mimalloc = {version = "0.1"}

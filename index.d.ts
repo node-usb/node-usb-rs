@@ -6,4 +6,8 @@ export class ExternalObject<T> {
     [K: symbol]: T
   }
 }
-export function plus100(input: number): number
+export interface Device {
+  vendor: number
+  product: number
+}
+export function listDevices(): Array<Device>
