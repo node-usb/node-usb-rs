@@ -46,10 +46,9 @@
     "prepare": "yarn build",
     "artifacts": "napi artifacts",
     "bench": "node -r @swc-node/register benchmark/bench.ts",
-    "build": "napi build --platform --release --pipe \"prettier -w\"",
-    "build:debug": "napi build --platform --pipe \"prettier -w\"",
-    "format": "run-p format:prettier format:rs",
-    "format:prettier": "prettier . -w",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "clean": "git clean -dfx",
     "format:rs": "cargo fmt",
     "lint": "eslint . -c ./.eslintrc.yml",
     "prepublishOnly": "napi prepublish -t npm",
@@ -71,7 +70,6 @@
     "husky": "^7.0.4",
     "lint-staged": "^12.1.2",
     "npm-run-all": "^4.1.5",
-    "prettier": "^2.5.1",
     "typescript": "^4.5.4"
   },
   "dependencies": {

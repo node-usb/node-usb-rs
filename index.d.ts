@@ -6,15 +6,16 @@ export class ExternalObject<T> {
     [K: symbol]: T
   }
 }
-export interface Device {
-  vendor: number
-  product: number
-}
 export interface Version {
   major: number
   micro: number
   minor: number
   nano: number
 }
-export function listDevices(): Array<Device>
+export interface Device {
+  vendor: number
+  product: number
+}
 export function getVersion(): Version
+export function listDevices(): Array<Device>
+export function getSerial(vid: number, pid: number): string
