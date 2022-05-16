@@ -210,8 +210,9 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { getVersion, listDevices, getSerial } = nativeBinding
+const { getVersion, Device, listDevices, findByIds } = nativeBinding
 
 module.exports.getVersion = getVersion
+module.exports.Device = Device
 module.exports.listDevices = listDevices
-module.exports.getSerial = getSerial
+module.exports.findByIds = findByIds

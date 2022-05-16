@@ -5,7 +5,10 @@ const version = usb.getVersion();
 console.log(`libusb ${version.major}.${version.minor}.${version.micro}`);
 
 const devices = usb.listDevices();
-console.log(devices);
+console.log(devices.map(device => ({
+    vendor: device.vendor,
+    product: device.product
+})));
 
 for (let i = 0; i < 5; i ++) {
     const worker = new Worker('./worker.js')
