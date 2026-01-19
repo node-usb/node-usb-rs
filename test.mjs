@@ -21,7 +21,8 @@ try {
     console.error(e.message);
 }
 await device.open();
-
+await device.claimInterface(0)
+console.log(inspect(device, { showHidden: true, getters: true, depth: null }));
 try {
     await device.selectConfiguration(100);
 } catch (e) {
@@ -30,8 +31,6 @@ try {
 
 await device.selectConfiguration(1);
 console.log(`device opened: ${device.opened}`);
-
-await device.claimInterface(0)
 
 const b = Uint8Array.from(
   { length: 0x40 - 0x30 },
