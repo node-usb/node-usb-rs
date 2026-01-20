@@ -3,14 +3,9 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use nusb::{descriptors::language_id::US_ENGLISH, MaybeFuture};
+use nusb::{descriptors::language_id::US_ENGLISH, transfer::Bulk, MaybeFuture};
+use std::io::{Read, Write};
 use std::time::Duration;
-
-/*
-  TODO
-  - implement clearHalt
-  - implement transferIn/transferOut
-*/
 
 fn decode_version(version: u16) -> (u8, u8, u8) {
     let major: u8 = (version >> 8) as u8;
@@ -198,11 +193,6 @@ pub struct USBDevice {
     device: Option<nusb::Device>,
     interfaces: Vec<Option<nusb::Interface>>,
 
-    // pub id: DeviceId
-    // pub port_chain: u8.
-    // pub bus_id: &str,
-    // pub device_address: u8,
-    // pub speed: Option<Speed>,
     #[napi(writable = false)]
     pub vendorId: u16,
     #[napi(writable = false)]
@@ -441,22 +431,83 @@ impl USBDevice {
         }
     }
 
-    /*
-        clearHalt(direction: USBDirection, endpointNumber: number): Promise<void>;
-        public async clearHalt(direction: USBDirection, endpointNumber: number): Promise<void> {
-          endpoint.clear_halt
+    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, address: u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
+        for maybe_iface in &self.interfaces {
+            let iface = match maybe_iface {
+                Some(i) => i,
+                None => continue,
+            };
+
+            for endpoint in iface.descriptor().unwrap().endpoints() {
+                if endpoint.direction() == DIR::DIR && endpoint.address() == address {
+                    return iface.endpoint::<Bulk, DIR>(address).ok();
+                }
+            }
         }
 
-        transferIn(endpointNumber: number, length: number): Promise<USBInTransferResult>;
-        transferOut(endpointNumber: number, data: BufferSource): Promise<USBOutTransferResult>;
-        public async transferIn(endpointNumber: number, length: number): Promise<USBInTransferResult> {
-          endpoint.reader
-        }
-        public async transferOut(endpointNumber: number, data: ArrayBuffer): Promise<USBOutTransferResult> {
-          endpoint.writer
+        None
+    }
+
+    #[napi]
+    pub async fn clearHalt(&self, #[napi(ts_arg_type = "USBDirection")] direction: String, endpointNumber: u8) -> Result<()> {
+        if direction == "in" {
+            match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
+                Some(mut endpoint) => {
+                    endpoint.clear_halt().wait().map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                }
+                None => {
+                    return Err(napi::Error::from_reason("clearHalt error: endpoint not found"));
+                }
+            }
+        } else {
+            match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
+                Some(mut endpoint) => {
+                    endpoint.clear_halt().wait().map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                }
+                None => {
+                    return Err(napi::Error::from_reason("clearHalt error: endpoint not found"));
+                }
+            }
         }
 
-    */
+        Ok(())
+    }
+
+    #[napi]
+    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<USBInTransferResult> {
+        match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
+            Some(endpoint) => {
+                let mut reader = endpoint.reader(4096);
+                let mut buf = vec![0; length as usize];
+                reader.read_exact(&mut buf)?;
+                return Ok(USBInTransferResult {
+                    data: Some(Uint8Array::from(buf)),
+                    status: "ok".to_string(),
+                });
+            }
+            None => {
+                return Err(napi::Error::from_reason("transferIn error: endpoint not found"));
+            }
+        }
+    }
+
+    #[napi]
+    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<USBOutTransferResult> {
+        match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
+            Some(endpoint) => {
+                let mut writer = endpoint.writer(4096);
+                writer.write_all(&data)?;
+                writer.flush()?;
+                return Ok(USBOutTransferResult {
+                    bytesWritten: data.len() as u32,
+                    status: "ok".to_string(),
+                });
+            }
+            None => {
+                return Err(napi::Error::from_reason("transferOut error: endpoint not found"));
+            }
+        }
+    }
 
     #[napi]
     pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<USBIsochronousInTransferResult> {

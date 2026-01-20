@@ -1,7 +1,10 @@
-import { list } from './index.js'
+import { getDeviceList, findBySerialNumber } from './index.js'
 import { inspect } from 'util';
 
-const devices = await list();
+const device2 = await findBySerialNumber('TEST_DEVICE');
+console.log(inspect(device2, { showHidden: true, getters: true, depth: null }));
+
+const devices = await getDeviceList();
 console.log(inspect(devices, { showHidden: true, getters: true }));
 
 let device = devices.find(d => d.vendorId === 0x59e3 && d.productId === 0x0a23);
