@@ -14,37 +14,7 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
     (major, minor, sub)
 }
 
-#[napi(object)]
-pub struct USBIsochronousInTransferPacket {
-    #[napi(writable = false)]
-    pub data: Option<Uint8Array>,
-    #[napi(writable = false, ts_type = "USBTransferStatus")]
-    pub status: String,
-}
-
-#[napi(object)]
-pub struct USBIsochronousInTransferResult {
-    #[napi(writable = false)]
-    pub data: Option<Uint8Array>,
-    #[napi(writable = false)]
-    pub packets: Vec<USBIsochronousInTransferPacket>,
-}
-
-#[napi(object)]
-pub struct USBIsochronousOutTransferPacket {
-    #[napi(writable = false)]
-    pub bytesWritten: u32,
-    #[napi(writable = false, ts_type = "USBTransferStatus")]
-    pub status: String,
-}
-
-#[napi(object)]
-pub struct USBIsochronousOutTransferResult {
-    #[napi(writable = false)]
-    pub packets: Vec<USBIsochronousOutTransferPacket>,
-}
-
-#[napi(object)]
+#[napi(object, js_name = "USBEndpoint")]
 pub struct USBEndpoint {
     #[napi(writable = false)]
     pub endpointNumber: u8,
@@ -76,7 +46,7 @@ impl USBEndpoint {
     }
 }
 
-#[napi(object)]
+#[napi(object, js_name = "USBAlternateInterface")]
 pub struct USBAlternateInterface {
     #[napi(writable = false)]
     pub alternateSetting: u8,
@@ -110,7 +80,7 @@ impl USBAlternateInterface {
     }
 }
 
-#[napi(object)]
+#[napi(object, js_name = "USBInterface")]
 pub struct USBInterface {
     #[napi(writable = false)]
     pub interfaceNumber: u8,
@@ -133,7 +103,7 @@ impl USBInterface {
     }
 }
 
-#[napi(object)]
+#[napi(object, js_name = "USBConfiguration")]
 pub struct USBConfiguration {
     #[napi(writable = false)]
     pub configurationValue: u8,
@@ -160,7 +130,7 @@ impl USBConfiguration {
     }
 }
 
-#[napi(object)]
+#[napi(object, js_name = "USBControlTransferParameters")]
 pub struct USBControlTransferParameters {
     #[napi(ts_type = "USBRequestType")]
     pub requestType: String,
@@ -171,23 +141,7 @@ pub struct USBControlTransferParameters {
     pub index: u16,
 }
 
-#[napi(object)]
-pub struct USBInTransferResult {
-    #[napi(writable = false)]
-    pub data: Option<Uint8Array>,
-    #[napi(writable = false, ts_type = "USBTransferStatus")]
-    pub status: String,
-}
-
-#[napi(object)]
-pub struct USBOutTransferResult {
-    #[napi(writable = false)]
-    pub bytesWritten: u32,
-    #[napi(writable = false, ts_type = "USBTransferStatus")]
-    pub status: String,
-}
-
-#[napi]
+#[napi(js_name = "USBDevice")]
 pub struct USBDevice {
     device_info: nusb::DeviceInfo,
     device: Option<nusb::Device>,
@@ -354,8 +308,8 @@ impl USBDevice {
         }
     }
 
-    #[napi]
-    pub async fn controlTransferIn(&self, setup: USBControlTransferParameters, length: u16) -> Result<USBInTransferResult> {
+    #[napi(js_name = "nativeControlTransferIn")]
+    pub async fn controlTransferIn(&self, setup: USBControlTransferParameters, length: u16) -> Result<Option<Uint8Array>> {
         match &self.device {
             Some(device) => {
                 let result = device
@@ -383,17 +337,14 @@ impl USBDevice {
                     )
                     .wait()
                     .map_err(|e| napi::Error::from_reason(format!("controlTransferIn error: {e}")))?;
-                Ok(USBInTransferResult {
-                    data: Some(Uint8Array::from(result)),
-                    status: "ok".to_string(),
-                })
+                Ok(Some(Uint8Array::from(result)))
             }
             None => Err(napi::Error::from_reason("controlTransferIn error: invalid state")),
         }
     }
 
-    #[napi]
-    pub async fn controlTransferOut(&self, setup: USBControlTransferParameters, data: Option<Uint8Array>) -> Result<USBOutTransferResult> {
+    #[napi(js_name = "nativeControlTransferOut")]
+    pub async fn controlTransferOut(&self, setup: USBControlTransferParameters, data: Option<Uint8Array>) -> Result<u32> {
         match &self.device {
             Some(device) => {
                 let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
@@ -422,10 +373,7 @@ impl USBDevice {
                     )
                     .wait()
                     .map_err(|e| napi::Error::from_reason(format!("controlTransferOut error: {e}")))?;
-                Ok(USBOutTransferResult {
-                    bytesWritten: bytes.len() as u32,
-                    status: "ok".to_string(),
-                })
+                Ok(bytes.len() as u32)
             }
             None => Err(napi::Error::from_reason("controlTransferOut error: invalid state")),
         }
@@ -473,17 +421,14 @@ impl USBDevice {
         Ok(())
     }
 
-    #[napi]
-    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<USBInTransferResult> {
+    #[napi(js_name = "nativeTransferIn")]
+    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<Option<Uint8Array>> {
         match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
             Some(endpoint) => {
                 let mut reader = endpoint.reader(4096);
                 let mut buf = vec![0; length as usize];
                 reader.read_exact(&mut buf)?;
-                return Ok(USBInTransferResult {
-                    data: Some(Uint8Array::from(buf)),
-                    status: "ok".to_string(),
-                });
+                return Ok(Some(Uint8Array::from(buf)));
             }
             None => {
                 return Err(napi::Error::from_reason("transferIn error: endpoint not found"));
@@ -491,17 +436,14 @@ impl USBDevice {
         }
     }
 
-    #[napi]
-    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<USBOutTransferResult> {
+    #[napi(js_name = "nativeTransferOut")]
+    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(endpoint) => {
                 let mut writer = endpoint.writer(4096);
                 writer.write_all(&data)?;
                 writer.flush()?;
-                return Ok(USBOutTransferResult {
-                    bytesWritten: data.len() as u32,
-                    status: "ok".to_string(),
-                });
+                return Ok(data.len() as u32);
             }
             None => {
                 return Err(napi::Error::from_reason("transferOut error: endpoint not found"));
@@ -509,13 +451,13 @@ impl USBDevice {
         }
     }
 
-    #[napi]
-    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<USBIsochronousInTransferResult> {
+    #[napi(ts_return_type = "Promise<USBIsochronousInTransferResult>")]
+    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
     }
 
-    #[napi]
-    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<USBIsochronousOutTransferResult> {
+    #[napi(ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
+    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
     }
 }
