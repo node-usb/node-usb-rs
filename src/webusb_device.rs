@@ -1,7 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use nusb::{descriptors::language_id::US_ENGLISH, transfer::Bulk, MaybeFuture};
-use std::io::{Read, Write};
+use nusb::{descriptors::language_id::US_ENGLISH, transfer::Bulk, transfer::Buffer, MaybeFuture};
 use std::time::Duration;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
@@ -378,21 +377,49 @@ impl UsbDevice {
         }
     }
 
-    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, endpointNumber:u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
-        for maybe_iface in &self.interfaces {
-            let iface = match maybe_iface {
-                Some(i) => i,
-                None => continue,
-            };
-
-            for endpoint in iface.descriptor().unwrap().endpoints() {
-                if endpoint.direction() == DIR::DIR && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber {
-                    return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
-                }
+    #[napi(js_name = "nativeTransferIn")]
+    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<Option<Uint8Array>> {
+        match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
+            Some(mut endpoint) => {
+                let packet_size = endpoint.max_packet_size();
+                let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
+                let buf = Buffer::new(req);
+                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(100));
+                completion.status.map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
+                let mut v = completion.buffer.into_vec();
+                v.truncate(completion.actual_len.min(length as usize));
+                return Ok(Some(Uint8Array::from(v)));
+            }
+            None => {
+                return Err(napi::Error::from_reason("transferIn error: endpoint not found"));
             }
         }
+    }
 
-        None
+    #[napi(js_name = "nativeTransferOut")]
+    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<u32> {
+        match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
+            Some(mut endpoint) => {
+                let mut buf = Buffer::new(data.len());
+                buf.extend_from_slice(&data);
+                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(100));
+                completion.status.map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
+                return Ok(completion.actual_len as u32);
+            }
+            None => {
+                return Err(napi::Error::from_reason("transferOut error: endpoint not found"));
+            }
+        }
+    }
+
+    #[napi(ts_return_type = "Promise<USBIsochronousInTransferResult>")]
+    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<()> {
+        Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
+    }
+
+    #[napi(ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
+    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<()> {
+        Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
     }
 
     #[napi]
@@ -420,43 +447,20 @@ impl UsbDevice {
         Ok(())
     }
 
-    #[napi(js_name = "nativeTransferIn")]
-    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<Option<Uint8Array>> {
-        match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
-            Some(endpoint) => {
-                let mut reader = endpoint.reader(128);
-                let mut buf = vec![0; length as usize];
-                reader.read_exact(&mut buf)?;
-                return Ok(Some(Uint8Array::from(buf)));
-            }
-            None => {
-                return Err(napi::Error::from_reason("transferIn error: endpoint not found"));
+    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, endpointNumber: u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
+        for maybe_iface in &self.interfaces {
+            let iface = match maybe_iface {
+                Some(i) => i,
+                None => continue,
+            };
+
+            for endpoint in iface.descriptor().unwrap().endpoints() {
+                if endpoint.direction() == DIR::DIR && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber {
+                    return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
+                }
             }
         }
-    }
 
-    #[napi(js_name = "nativeTransferOut")]
-    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<u32> {
-        match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
-            Some(endpoint) => {
-                let mut writer = endpoint.writer(128);
-                writer.write_all(&data)?;
-                writer.flush_end_async().await?;
-                return Ok(data.len() as u32);
-            }
-            None => {
-                return Err(napi::Error::from_reason("transferOut error: endpoint not found"));
-            }
-        }
-    }
-
-    #[napi(ts_return_type = "Promise<USBIsochronousInTransferResult>")]
-    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<()> {
-        Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
-    }
-
-    #[napi(ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
-    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<()> {
-        Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
+        None
     }
 }

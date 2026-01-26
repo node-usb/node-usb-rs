@@ -109,53 +109,49 @@ const augmentDevice = (device: UsbDevice): USBDevice => {
     console.log(inspect(webusbDev, { showHidden: true, getters: true, depth: null }));
     console.log(`device opened: ${webusbDev.opened}`);
 
-    const b = Uint8Array.from(
+    const b1 = Uint8Array.from(
         { length: 0x40 - 0x30 },
-        (_, i) => 0x30 + i
+        (_, i) => 0x31 + i
     ).buffer;
 
-
-    let outResult = await webusbDev.controlTransferOut({
+    let outResultC = await webusbDev.controlTransferOut({
         requestType: 'vendor',
         recipient: 'device',
         request: 0x81,
         value: 0,
         index: 0
-    }, b)
-    console.log(outResult.status);
+    }, b1)
+    console.log(outResultC.status);
+    console.log(b1.byteLength)
+    console.log(outResultC.bytesWritten);
 
-    console.log(b.byteLength)
-    console.log(b);
-    console.log(outResult.bytesWritten);
-
-    let inResult = await webusbDev.controlTransferIn({
+    let inResultC = await webusbDev.controlTransferIn({
         requestType: 'vendor',
         recipient: 'device',
         request: 0x81,
         value: 0,
         index: 0
     }, 128)
+    console.log(inResultC.status);
+    console.log(b1);
+    console.log(inResultC.data!.buffer);
+    console.log(Buffer.from(b1).equals(Buffer.from(inResultC.data!.buffer)));
 
-    console.log(inResult.status);
-    console.log(Buffer.from(b).equals(Buffer.from(inResult.data!.buffer)));
+    const b2 = Uint8Array.from(
+        { length: 0x40 - 0x30 },
+        (_, i) => 0x32 + i
+    ).buffer;
 
-
-    outResult = await webusbDev.transferOut(2, b)
+    let outResult = await webusbDev.transferOut(2, b2)
     console.log(outResult.status);
-
-    console.log(b.byteLength)
-    console.log(b);
+    console.log(b2.byteLength)
     console.log(outResult.bytesWritten);
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
-   
-    inResult = await webusbDev.transferIn(1, b.byteLength)
+    let inResult = await webusbDev.transferIn(1, b2.byteLength)
     console.log(inResult.status);
-    console.log(Buffer.from(b).equals(Buffer.from(inResult.data!.buffer)));
-
-    inResult = await webusbDev.transferIn(1, b.byteLength)
-    console.log(inResult.status);
-    console.log(Buffer.from(b).equals(Buffer.from(inResult.data!.buffer)));
+    console.log(b2);
+    console.log(inResult.data!.buffer);
+    console.log(Buffer.from(b2).equals(Buffer.from(inResult.data!.buffer)));
 
     await webusbDev.close();
     console.log(`device opened: ${webusbDev.opened}`);
