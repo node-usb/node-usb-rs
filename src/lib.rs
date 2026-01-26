@@ -4,7 +4,7 @@ mod webusb_device;
 
 use napi_derive::napi;
 use nusb::MaybeFuture;
-use webusb_device::USBDevice;
+use webusb_device::UsbDevice;
 
 /*
   TODO
@@ -14,28 +14,28 @@ use webusb_device::USBDevice;
 */
 
 #[napi]
-pub async fn getDeviceList() -> Vec<USBDevice> {
-    nusb::list_devices().wait().unwrap().map(|dev| USBDevice::new(dev)).collect()
+pub async fn getDeviceList() -> Vec<UsbDevice> {
+    nusb::list_devices().wait().unwrap().map(|dev| UsbDevice::new(dev)).collect()
 }
 
 #[napi]
-pub async fn findByIds(vendorId: u16, productId: u16) -> USBDevice {
+pub async fn findByIds(vendorId: u16, productId: u16) -> UsbDevice {
     let device = nusb::list_devices()
         .wait()
         .unwrap()
         .find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId)
         .expect("device not found");
 
-    USBDevice::new(device)
+    UsbDevice::new(device)
 }
 
 #[napi]
-pub async fn findBySerialNumber(serialNumber: String) -> USBDevice {
+pub async fn findBySerialNumber(serialNumber: String) -> UsbDevice {
     let device = nusb::list_devices()
         .wait()
         .unwrap()
         .find(|dev| dev.serial_number() == Some(serialNumber.as_str()))
         .expect("device not found");
 
-    USBDevice::new(device)
+    UsbDevice::new(device)
 }

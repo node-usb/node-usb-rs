@@ -1,9 +1,9 @@
 
 [package]
-authors = ["LongYinan <lynweklm@gmail.com>"]
+authors = ["Rob Moran <thegecko@github.com>"]
 edition = "2021"
 name = "usb"
-version = "0.1.0"
+version = "3.0.0"
 
 [lib]
 crate-type = ["cdylib"]

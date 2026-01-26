@@ -1,14 +1,18 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "strict": true,
-    "moduleResolution": "node",
-    "module": "CommonJS",
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
-  },
-  "include": ["."],
-  "exclude": ["node_modules", "bench", "__test__"]
+    "compilerOptions": {
+        "target": "ES2019",
+        "module": "CommonJS",
+        "strict": true,
+        "downlevelIteration": true,
+        "noImplicitReturns": true,
+        "noEmitOnError": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "sourceMap": true,
+        "declaration": true,
+        "outDir": "dist"
+    },
+    "include": [
+        "tsc"
+    ]
 }

@@ -1,11 +1,10 @@
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nusb::{descriptors::language_id::US_ENGLISH, transfer::Bulk, MaybeFuture};
 use std::io::{Read, Write};
 use std::time::Duration;
+
+const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
 
 fn decode_version(version: u16) -> (u8, u8, u8) {
     let major: u8 = (version >> 8) as u8;
@@ -15,7 +14,7 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
 }
 
 #[napi(object, js_name = "USBEndpoint")]
-pub struct USBEndpoint {
+pub struct UsbEndpoint {
     #[napi(writable = false)]
     pub endpointNumber: u8,
     #[napi(writable = false, ts_type = "USBDirection")]
@@ -26,10 +25,10 @@ pub struct USBEndpoint {
     pub packetSize: u32,
 }
 
-impl USBEndpoint {
+impl UsbEndpoint {
     pub fn new(endpoint: nusb::descriptors::EndpointDescriptor) -> Self {
         Self {
-            endpointNumber: endpoint.address(),
+            endpointNumber: endpoint.address() & ENDPOINT_NUMBER_MASK,
             direction: if endpoint.direction() == nusb::transfer::Direction::In {
                 "in".to_string()
             } else {
@@ -47,7 +46,7 @@ impl USBEndpoint {
 }
 
 #[napi(object, js_name = "USBAlternateInterface")]
-pub struct USBAlternateInterface {
+pub struct UsbAlternateInterface {
     #[napi(writable = false)]
     pub alternateSetting: u8,
     #[napi(writable = false)]
@@ -59,10 +58,10 @@ pub struct USBAlternateInterface {
     #[napi(writable = false)]
     pub interfaceName: Option<String>,
     #[napi(writable = false)]
-    pub endpoints: Vec<USBEndpoint>,
+    pub endpoints: Vec<UsbEndpoint>,
 }
 
-impl USBAlternateInterface {
+impl UsbAlternateInterface {
     pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Self {
         let interfaceName = match iface.string_index() {
             Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
@@ -75,52 +74,52 @@ impl USBAlternateInterface {
             interfaceSubclass: iface.subclass(),
             interfaceProtocol: iface.protocol(),
             interfaceName,
-            endpoints: iface.endpoints().map(|endpoint| USBEndpoint::new(endpoint)).collect(),
+            endpoints: iface.endpoints().map(|endpoint| UsbEndpoint::new(endpoint)).collect(),
         }
     }
 }
 
 #[napi(object, js_name = "USBInterface")]
-pub struct USBInterface {
+pub struct UsbInterface {
     #[napi(writable = false)]
     pub interfaceNumber: u8,
     #[napi(writable = false)]
     pub claimed: bool,
     #[napi(writable = false)]
-    pub alternate: USBAlternateInterface,
+    pub alternate: UsbAlternateInterface,
     #[napi(writable = false)]
-    pub alternates: Vec<USBAlternateInterface>,
+    pub alternates: Vec<UsbAlternateInterface>,
 }
 
-impl USBInterface {
-    pub fn new(usb_device: &USBDevice, device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptors) -> Self {
+impl UsbInterface {
+    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptors) -> Self {
         Self {
             interfaceNumber: iface.interface_number(),
             claimed: usb_device.interfaces[iface.interface_number() as usize].is_some(),
-            alternate: USBAlternateInterface::new(&device, iface.first_alt_setting()),
-            alternates: iface.alt_settings().map(|iface| USBAlternateInterface::new(&device, iface)).collect(),
+            alternate: UsbAlternateInterface::new(&device, iface.first_alt_setting()),
+            alternates: iface.alt_settings().map(|iface| UsbAlternateInterface::new(&device, iface)).collect(),
         }
     }
 }
 
 #[napi(object, js_name = "USBConfiguration")]
-pub struct USBConfiguration {
+pub struct UsbConfiguration {
     #[napi(writable = false)]
     pub configurationValue: u8,
     #[napi(writable = false)]
     pub configurationName: Option<String>,
     #[napi(writable = false)]
-    pub interfaces: Vec<USBInterface>,
+    pub interfaces: Vec<UsbInterface>,
 }
 
-impl USBConfiguration {
-    pub fn new(usb_device: &USBDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Self {
+impl UsbConfiguration {
+    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Self {
         let configurationName = match config.string_index() {
             Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
             None => None,
         };
 
-        let interfaces = config.interfaces().map(|iface| USBInterface::new(&usb_device, &device, iface)).collect();
+        let interfaces = config.interfaces().map(|iface| UsbInterface::new(&usb_device, &device, iface)).collect();
 
         Self {
             configurationValue: config.configuration_value(),
@@ -131,7 +130,7 @@ impl USBConfiguration {
 }
 
 #[napi(object, js_name = "USBControlTransferParameters")]
-pub struct USBControlTransferParameters {
+pub struct UsbControlTransferParameters {
     #[napi(ts_type = "USBRequestType")]
     pub requestType: String,
     #[napi(ts_type = "USBRecipient")]
@@ -141,8 +140,8 @@ pub struct USBControlTransferParameters {
     pub index: u16,
 }
 
-#[napi(js_name = "USBDevice")]
-pub struct USBDevice {
+#[napi]
+pub struct UsbDevice {
     device_info: nusb::DeviceInfo,
     device: Option<nusb::Device>,
     interfaces: Vec<Option<nusb::Interface>>,
@@ -178,7 +177,7 @@ pub struct USBDevice {
 }
 
 #[napi]
-impl USBDevice {
+impl UsbDevice {
     pub fn new(device_info: nusb::DeviceInfo) -> Self {
         let (deviceVersionMajor, deviceVersionMinor, deviceVersionSubminor) = decode_version(device_info.device_version());
         let (usbVersionMajor, usbVersionMinor, usbVersionSubminor) = decode_version(device_info.usb_version());
@@ -210,19 +209,19 @@ impl USBDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn configurations(&mut self) -> Vec<USBConfiguration> {
+    pub unsafe fn configurations(&mut self) -> Vec<UsbConfiguration> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
             None => self._open().unwrap(),
         };
 
-        device.configurations().map(|config| USBConfiguration::new(&self, &device, config)).collect()
+        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect()
     }
 
     #[napi(getter)]
-    pub unsafe fn configuration(&mut self) -> Option<USBConfiguration> {
+    pub unsafe fn configuration(&mut self) -> Option<UsbConfiguration> {
         match &self.device {
-            Some(device) => Some(USBConfiguration::new(&self, &device, device.active_configuration().unwrap())),
+            Some(device) => Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap())),
             None => None,
         }
     }
@@ -309,7 +308,7 @@ impl USBDevice {
     }
 
     #[napi(js_name = "nativeControlTransferIn")]
-    pub async fn controlTransferIn(&self, setup: USBControlTransferParameters, length: u16) -> Result<Option<Uint8Array>> {
+    pub async fn controlTransferIn(&self, setup: UsbControlTransferParameters, length: u16) -> Result<Option<Uint8Array>> {
         match &self.device {
             Some(device) => {
                 let result = device
@@ -344,7 +343,7 @@ impl USBDevice {
     }
 
     #[napi(js_name = "nativeControlTransferOut")]
-    pub async fn controlTransferOut(&self, setup: USBControlTransferParameters, data: Option<Uint8Array>) -> Result<u32> {
+    pub async fn controlTransferOut(&self, setup: UsbControlTransferParameters, data: Option<Uint8Array>) -> Result<u32> {
         match &self.device {
             Some(device) => {
                 let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
@@ -379,7 +378,7 @@ impl USBDevice {
         }
     }
 
-    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, address: u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
+    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, endpointNumber:u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
         for maybe_iface in &self.interfaces {
             let iface = match maybe_iface {
                 Some(i) => i,
@@ -387,8 +386,8 @@ impl USBDevice {
             };
 
             for endpoint in iface.descriptor().unwrap().endpoints() {
-                if endpoint.direction() == DIR::DIR && endpoint.address() == address {
-                    return iface.endpoint::<Bulk, DIR>(address).ok();
+                if endpoint.direction() == DIR::DIR && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber {
+                    return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
                 }
             }
         }
@@ -425,7 +424,7 @@ impl USBDevice {
     pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<Option<Uint8Array>> {
         match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
             Some(endpoint) => {
-                let mut reader = endpoint.reader(4096);
+                let mut reader = endpoint.reader(128);
                 let mut buf = vec![0; length as usize];
                 reader.read_exact(&mut buf)?;
                 return Ok(Some(Uint8Array::from(buf)));
@@ -440,9 +439,9 @@ impl USBDevice {
     pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(endpoint) => {
-                let mut writer = endpoint.writer(4096);
+                let mut writer = endpoint.writer(128);
                 writer.write_all(&data)?;
-                writer.flush()?;
+                writer.flush_end_async().await?;
                 return Ok(data.len() as u32);
             }
             None => {

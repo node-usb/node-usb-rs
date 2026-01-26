@@ -1,9 +1,7 @@
 .DS_Store
 node_modules
+dist
 target
-*.js
-*.cjs
-*.mjs
-!./test.mjs
-*.node
+index.js
 index.d.ts
+*.node

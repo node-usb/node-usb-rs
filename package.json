@@ -3,7 +3,7 @@
   "description": "Library to access USB devices",
   "license": "MIT",
   "version": "3.0.0",
-  "main": "index.js",
+  "main": "dist/index.js",
   "engines": {
     "node": ">= 12.22.0 < 13 || >= 14.17.0 < 15 || >= 15.12.0 < 16 || >= 16.0.0"
   },
@@ -40,10 +40,12 @@
     "hardware"
   ],
   "scripts": {
-    "clean": "git clean -fx ./target ./node_modules",
+    "clean": "git clean -fx ./dist ./target ./node_modules",
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build:native": "napi build --platform --release",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:native && npm run build:ts",
+    "full-test": "mocha --timeout 10000 --require coffeescript/register test/*.coffee",
     "prepublishOnly": "napi prepublish -t npm",
     "preversion": "napi build --platform && git add .",
     "version": "napi version"
@@ -53,6 +55,9 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.2.0",
+    "@types/node": "^25.0.10",
+    "coffeescript": "^2.7.0",
+    "mocha": "^11.7.5",
     "typescript": "^5.9.3"
   },
   "napi": {
