@@ -1,6 +1,6 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use nusb::{descriptors::language_id::US_ENGLISH, transfer::Bulk, transfer::Buffer, MaybeFuture};
+use nusb::{descriptors::language_id::US_ENGLISH, transfer::Buffer, transfer::Bulk, MaybeFuture};
 use std::time::Duration;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
@@ -10,6 +10,23 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
     let minor: u8 = ((version >> 4) & 0x0F) as u8;
     let sub: u8 = (version & 0x0F) as u8;
     (major, minor, sub)
+}
+
+pub struct HandleInner(pub nusb::DeviceId);
+
+#[napi]
+pub struct Handle {
+    inner: HandleInner,
+}
+
+impl Handle {
+    pub fn from_nusb(id: nusb::DeviceId) -> Self {
+        Handle { inner: HandleInner(id) }
+    }
+
+    pub fn to_nusb(&self) -> nusb::DeviceId {
+        self.inner.0
+    }
 }
 
 #[napi(object, js_name = "USBEndpoint")]
@@ -200,6 +217,11 @@ impl UsbDevice {
             productName: device_info.product_string().map(|s| s.to_string()),
             serialNumber: device_info.serial_number().map(|s| s.to_string()),
         }
+    }
+
+    #[napi(getter)]
+    pub fn handle(&self) -> Handle {
+        Handle::from_nusb(self.device_info.id())
     }
 
     #[napi(getter)]

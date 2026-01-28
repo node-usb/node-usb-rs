@@ -10,15 +10,16 @@ use webusb_device::UsbDevice;
   TODO
   - tidy error returns
   - implement hotplug events: watch_devices -> HotplugWatch
+  - fix endpoint read/write
   - test!
 */
 
-#[napi]
+#[napi(js_name = "nativeGetDeviceList")]
 pub async fn getDeviceList() -> Vec<UsbDevice> {
     nusb::list_devices().wait().unwrap().map(|dev| UsbDevice::new(dev)).collect()
 }
 
-#[napi]
+#[napi(js_name = "nativeFindByIds")]
 pub async fn findByIds(vendorId: u16, productId: u16) -> UsbDevice {
     let device = nusb::list_devices()
         .wait()
@@ -29,7 +30,7 @@ pub async fn findByIds(vendorId: u16, productId: u16) -> UsbDevice {
     UsbDevice::new(device)
 }
 
-#[napi]
+#[napi(js_name = "nativeFindBySerialNumber")]
 pub async fn findBySerialNumber(serialNumber: String) -> UsbDevice {
     let device = nusb::list_devices()
         .wait()

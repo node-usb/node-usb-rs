@@ -1,7 +1,7 @@
 assert = require('assert')
 util = require('util')
-webusb = require('../').webusb
-WebUSB = require('../').WebUSB
+webusb = require('../dist').webusb
+WebUSB = require('../dist').WebUSB
 
 if typeof gc is 'function'
     # running with --expose-gc, do a sweep between tests so valgrind blames the right one
@@ -182,7 +182,8 @@ describe 'Throwing Transfers', ->
 
 describe 'Transfers', ->
     device = null
-    b = Uint8Array.from([0x30...0x40]).buffer
+    b1 = Uint8Array.from([0x30...0x40]).buffer
+    b2 = Uint8Array.from([0x31...0x41]).buffer
 
     before ->
         device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
@@ -196,10 +197,10 @@ describe 'Transfers', ->
             request: 0x81,
             value: 0,
             index: 0
-        }, b)
+        }, b1)
 
         assert.equal(transferResult.status, 'ok')
-        assert.equal(transferResult.bytesWritten, b.byteLength)
+        assert.equal(transferResult.bytesWritten, b1.byteLength)
 
     it 'should control transfer IN', ->
         transferResult = await device.controlTransferIn({
@@ -208,20 +209,24 @@ describe 'Transfers', ->
             request: 0x81,
             value: 0,
             index: 0
-        }, 128)
+        }, b1.byteLength)
 
         assert.equal(transferResult.status, 'ok')
-        assert.equal(transferResult.data.buffer.toString(), b.toString())
+        assert.equal(transferResult.data.byteLength, b1.byteLength)
+        assert.equal(Buffer.from(transferResult.data), Buffer.from(b1))
 
     it 'should transfer OUT', ->
-        transferResult = await device.transferOut(2, b)
+        transferResult = await device.transferOut(2, b2)
+
         assert.equal(transferResult.status, 'ok')
-        assert.equal(transferResult.bytesWritten, b.byteLength)
+        assert.equal(transferResult.bytesWritten, b2.byteLength)
 
     it 'should transfer IN', ->
-        transferResult = await device.transferIn(1, 64)
+        transferResult = await device.transferIn(1, b2.byteLength)
+
         assert.equal(transferResult.status, 'ok')
-        assert.equal(transferResult.data.byteLength, 64)
+        assert.equal(transferResult.data.byteLength, b2.byteLength)
+        assert.equal(Buffer.from(transferResult.data), Buffer.from(b2))
 
     after ->
         device.close()
