@@ -2,7 +2,7 @@
 
 mod webusb_device;
 
-use futures_lite::stream;
+use futures_lite::StreamExt;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
@@ -24,40 +24,51 @@ pub struct Emitter {
 impl Emitter {
     #[napi(constructor)]
     pub fn new() -> Self {
-        let instance = Self {
+        Self {
             attachCallback: None,
             detachCallback: None,
-        };
+        }
+    }
 
-        let watch = nusb::watch_devices().unwrap();
-        for event in stream::block_on(watch) {
+    #[napi]
+    pub async unsafe fn start(&self) {
+        let mut watch = nusb::watch_devices().unwrap();
+        while let Some(event) = watch.next().await {
             match event {
                 HotplugEvent::Connected(info) => {
-                    if let Some(callback) = &instance.attachCallback {
+                    if let Some(callback) = &self.attachCallback {
                         let device = UsbDevice::new(info);
                         callback.call(device, ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
                 HotplugEvent::Disconnected(id) => {
-                    if let Some(callback) = &instance.detachCallback {
+                    if let Some(callback) = &self.detachCallback {
                         let handle = Handle::from_nusb(id);
                         callback.call(handle, ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
             }
         }
-
-        instance
     }
 
     #[napi]
-    pub fn onAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
+    pub fn addAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
         self.attachCallback = Some(callback);
     }
 
     #[napi]
-    pub fn onDetach(&mut self, callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
+    pub fn removeAttach(&mut self, _callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
+        self.attachCallback = None;
+    }
+
+    #[napi]
+    pub fn addDetach(&mut self, callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
         self.detachCallback = Some(callback);
+    }
+
+    #[napi]
+    pub fn removeDetach(&mut self, _callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
+        self.detachCallback = None;
     }
 }
 

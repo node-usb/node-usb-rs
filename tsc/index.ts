@@ -104,7 +104,7 @@ const augmentDevice = (device: UsbDevice): USBDevice => {
     return device as unknown as USBDevice;
 };
 
-const clone = (obj:any): any => structuredClone(JSON.parse(JSON.stringify(obj)));
+const clone = (obj: any): any => structuredClone(JSON.parse(JSON.stringify(obj)));
 
 class WebUSB implements USB {
 
@@ -152,9 +152,9 @@ class WebUSB implements USB {
             }
 
             if (event === 'connect') {
-                this.nativeEmitter.onAttach(deviceConnectCallback);
+                this.nativeEmitter.addAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
-                this.nativeEmitter.onDetach(deviceDisconnectCallback);
+                this.nativeEmitter.addDetach(deviceDisconnectCallback);
             }
         });
 
@@ -166,11 +166,13 @@ class WebUSB implements USB {
             }
 
             if (event === 'connect') {
-                // TODO: usb.removeListener('attach', deviceConnectCallback);
+                this.nativeEmitter.removeAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
-                // TODO: usb.removeListener('detach', deviceDisconnectCallback);
+                this.nativeEmitter.removeDetach(deviceDisconnectCallback);
             }
         });
+
+        this.nativeEmitter.start();
     }
 
     private _onconnect: ((ev: USBConnectionEvent) => void) | undefined;
@@ -307,7 +309,7 @@ class WebUSB implements USB {
         const devices: USBDevice[] = [];
         const refreshedKnownDevices = new Map<Handle, USBDevice>();
 
-        
+
         for (const nativeDevice of nativeDevices) {
             const device = augmentDevice(nativeDevice);
             devices.push(device);
