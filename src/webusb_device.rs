@@ -219,7 +219,7 @@ impl UsbDevice {
         }
     }
 
-    #[napi(getter)]
+    #[napi(getter, enumerable = false, configurable = false)]
     pub fn handle(&self) -> Handle {
         Handle::from_nusb(self.device_info.id())
     }

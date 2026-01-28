@@ -2,17 +2,64 @@
 
 mod webusb_device;
 
+use futures_lite::stream;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
-use nusb::MaybeFuture;
-use webusb_device::UsbDevice;
-
+use nusb::{hotplug::HotplugEvent, MaybeFuture};
+use webusb_device::{Handle, UsbDevice};
 /*
   TODO
   - tidy error returns
-  - implement hotplug events: watch_devices -> HotplugWatch
   - fix endpoint read/write
   - test!
 */
+
+#[napi]
+pub struct Emitter {
+    attachCallback: Option<ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>>,
+    detachCallback: Option<ThreadsafeFunction<Handle, (), Handle, napi::Status, false>>,
+}
+
+#[napi]
+impl Emitter {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        let instance = Self {
+            attachCallback: None,
+            detachCallback: None,
+        };
+
+        let watch = nusb::watch_devices().unwrap();
+        for event in stream::block_on(watch) {
+            match event {
+                HotplugEvent::Connected(info) => {
+                    if let Some(callback) = &instance.attachCallback {
+                        let device = UsbDevice::new(info);
+                        callback.call(device, ThreadsafeFunctionCallMode::NonBlocking);
+                    }
+                }
+                HotplugEvent::Disconnected(id) => {
+                    if let Some(callback) = &instance.detachCallback {
+                        let handle = Handle::from_nusb(id);
+                        callback.call(handle, ThreadsafeFunctionCallMode::NonBlocking);
+                    }
+                }
+            }
+        }
+
+        instance
+    }
+
+    #[napi]
+    pub fn onAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
+        self.attachCallback = Some(callback);
+    }
+
+    #[napi]
+    pub fn onDetach(&mut self, callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
+        self.detachCallback = Some(callback);
+    }
+}
 
 #[napi(js_name = "nativeGetDeviceList")]
 pub async fn getDeviceList() -> Vec<UsbDevice> {

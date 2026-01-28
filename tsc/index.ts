@@ -1,6 +1,5 @@
-import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice } from '../index.js'
+import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter, Handle } from '../index.js'
 import { EventEmitter } from 'events';
-import { inspect } from 'util';
 
 /**
  * USB Options
@@ -105,15 +104,18 @@ const augmentDevice = (device: UsbDevice): USBDevice => {
     return device as unknown as USBDevice;
 };
 
+const clone = (obj:any): any => structuredClone(JSON.parse(JSON.stringify(obj)));
+
 class WebUSB implements USB {
 
+    protected nativeEmitter = new Emitter();
     protected emitter = new EventEmitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
+    protected knownDevices: Map<Handle, USBDevice> = new Map();
 
     constructor(private options: USBOptions = {}) {
-        /* TODO
-        const deviceConnectCallback = async (device: usb.Device) => {
-            const webDevice = await this.getWebDevice(device);
+        const deviceConnectCallback = async (device: UsbDevice) => {
+            const webDevice = augmentDevice(device);
 
             // When connected, emit an event if it is an allowed device
             if (webDevice && this.isAuthorisedDevice(webDevice)) {
@@ -126,10 +128,10 @@ class WebUSB implements USB {
             }
         };
 
-        const deviceDisconnectCallback = async (device: usb.Device) => {
+        const deviceDisconnectCallback = async (handle: Handle) => {
             // When disconnected, emit an event if the device was a known allowed device
-            if (this.knownDevices.has(device)) {
-                const webDevice = this.knownDevices.get(device);
+            if (this.knownDevices.has(handle)) {
+                const webDevice = this.knownDevices.get(handle);
 
                 if (webDevice && this.isAuthorisedDevice(webDevice)) {
                     const event = {
@@ -141,7 +143,6 @@ class WebUSB implements USB {
                 }
             }
         };
-        */
 
         this.emitter.on('newListener', event => {
             const listenerCount = this.emitter.listenerCount(event);
@@ -151,9 +152,9 @@ class WebUSB implements USB {
             }
 
             if (event === 'connect') {
-                // TODO: usb.addListener('attach', deviceConnectCallback);
+                this.nativeEmitter.onAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
-                // TODO: usb.addListener('detach', deviceDisconnectCallback);
+                this.nativeEmitter.onDetach(deviceDisconnectCallback);
             }
         });
 
@@ -298,15 +299,27 @@ class WebUSB implements USB {
     }
 
     private async loadDevices(preFilters?: USBDeviceFilter[]): Promise<USBDevice[]> {
-        let devices = await getDeviceList();
+        let nativeDevices = await nativeGetDeviceList();
 
         // Pre-filter devices
-        devices = this.quickFilter(devices, preFilters);
+        nativeDevices = this.quickFilter(nativeDevices, preFilters);
+
+        const devices: USBDevice[] = [];
+        const refreshedKnownDevices = new Map<Handle, USBDevice>();
+
+        
+        for (const nativeDevice of nativeDevices) {
+            const device = augmentDevice(nativeDevice);
+            devices.push(device);
+            refreshedKnownDevices.set(nativeDevice.handle, clone(device));
+        }
+
+        this.knownDevices = refreshedKnownDevices;
         return devices;
     }
 
     // Undertake quick filter on devices before creating WebUSB devices if possible
-    private quickFilter(devices: USBDevice[], preFilters?: USBDeviceFilter[]): USBDevice[] {
+    private quickFilter(devices: UsbDevice[], preFilters?: USBDeviceFilter[]): UsbDevice[] {
         if (!preFilters || !preFilters.length) {
             return devices;
         }
@@ -448,90 +461,3 @@ export {
     findByIds,
     findBySerialNumber,
 };
-
-// TESTING CODE
-(async () => {
-    const device2 = await findBySerialNumber('TEST_DEVICE');
-    console.log(inspect(device2, { showHidden: true, getters: true, depth: null }));
-    const devices = await getDeviceList();
-    console.log(inspect(devices, { showHidden: true, getters: true }));
-
-    let device = devices.find(d => d.vendorId === 0x59e3 && d.productId === 0x0a23);
-    if (!device) {
-        throw new Error('device not found');
-    }
-
-    for (const dev of devices) {
-        try {
-            await dev.open();
-            console.log(`device opened: ${dev.opened}`);
-            await dev.close();
-            console.log(`device opened: ${dev.opened}`);
-        } catch (e) {
-            console.error((e as Error).message);
-        }
-    }
-    try {
-        await device.selectConfiguration(100);
-    } catch (e) {
-        console.error((e as Error).message);
-    }
-    await device.open();
-    try {
-        await device.selectConfiguration(100);
-    } catch (e) {
-        console.error((e as Error).message);
-    }
-
-    await device.selectConfiguration(1);
-    await device.claimInterface(0)
-    console.log(inspect(device, { showHidden: true, getters: true, depth: null }));
-    console.log(`device opened: ${device.opened}`);
-
-    const b1 = Uint8Array.from(
-        { length: 0x40 - 0x30 },
-        (_, i) => 0x31 + i
-    ).buffer;
-
-    let outResultC = await device.controlTransferOut({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 0x81,
-        value: 0,
-        index: 0
-    }, b1)
-    console.log(outResultC.status);
-    console.log(b1.byteLength)
-    console.log(outResultC.bytesWritten);
-
-    let inResultC = await device.controlTransferIn({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 0x81,
-        value: 0,
-        index: 0
-    }, 128)
-    console.log(inResultC.status);
-    console.log(b1);
-    console.log(inResultC.data!.buffer);
-    console.log(Buffer.from(b1).equals(Buffer.from(inResultC.data!.buffer)));
-
-    const b2 = Uint8Array.from(
-        { length: 0x40 - 0x30 },
-        (_, i) => 0x32 + i
-    ).buffer;
-
-    let outResult = await device.transferOut(2, b2)
-    console.log(outResult.status);
-    console.log(b2.byteLength)
-    console.log(outResult.bytesWritten);
-
-    let inResult = await device.transferIn(1, b2.byteLength)
-    console.log(inResult.status);
-    console.log(b2);
-    console.log(inResult.data!.buffer);
-    console.log(Buffer.from(b2).equals(Buffer.from(inResult.data!.buffer)));
-
-    await device.close();
-    console.log(`device opened: ${device.opened}`);
-})();

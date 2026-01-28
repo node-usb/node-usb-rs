@@ -9,6 +9,7 @@ version = "3.0.0"
 crate-type = ["cdylib"]
 
 [dependencies]
+futures-lite = "2.6.1"
 napi = { version = "3.0.0", features = ["tokio_rt"] }
 napi-derive = "3.0.0"
 nusb = "=0.2.1"
