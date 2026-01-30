@@ -183,7 +183,7 @@ describe 'Throwing Transfers', ->
 describe 'Transfers', ->
     device = null
     b1 = Uint8Array.from([0x30...0x40]).buffer
-    b2 = Uint8Array.from([0x31...0x41]).buffer
+    b2 = Uint8Array.from([0x32...0x42]).buffer
 
     before ->
         device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
@@ -209,24 +209,29 @@ describe 'Transfers', ->
             request: 0x81,
             value: 0,
             index: 0
-        }, b1.byteLength)
+        }, 128)
 
         assert.equal(transferResult.status, 'ok')
         assert.equal(transferResult.data.byteLength, b1.byteLength)
-        assert.equal(Buffer.from(transferResult.data), Buffer.from(b1))
+        resultBuffer = Buffer.from(transferResult.data.buffer, transferResult.data.byteOffset, transferResult.data.byteLength);
+        expectedBuffer = Buffer.from(b1, 0, b1.byteLength);
+        assert(resultBuffer.equals(expectedBuffer));
 
     it 'should transfer OUT', ->
-        transferResult = await device.transferOut(2, b2)
+        transferResult = await device.transferOut(4, b2)
 
         assert.equal(transferResult.status, 'ok')
         assert.equal(transferResult.bytesWritten, b2.byteLength)
 
     it 'should transfer IN', ->
-        transferResult = await device.transferIn(1, b2.byteLength)
+        transferResult = await device.transferIn(3, b2.byteLength)
 
         assert.equal(transferResult.status, 'ok')
         assert.equal(transferResult.data.byteLength, b2.byteLength)
-        assert.equal(Buffer.from(transferResult.data), Buffer.from(b2))
+
+        resultBuffer = Buffer.from(transferResult.data.buffer, transferResult.data.byteOffset, transferResult.data.byteLength);
+        expectedBuffer = Buffer.from(b2, 0, b2.byteLength);
+        assert(resultBuffer.equals(expectedBuffer));
 
     after ->
         device.close()

@@ -7,12 +7,6 @@ use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
 use webusb_device::{Handle, UsbDevice};
-/*
-  TODO
-  - tidy error returns
-  - fix endpoint read/write
-  - test!
-*/
 
 #[napi]
 pub struct Emitter {
