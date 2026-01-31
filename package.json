@@ -42,9 +42,9 @@
   "scripts": {
     "clean": "git clean -fx ./dist ./target ./node_modules",
     "artifacts": "napi artifacts",
-    "build:native": "napi build --platform --release",
+    "build": "napi build --platform --release",
     "build:ts": "tsc",
-    "build": "npm run build:native && npm run build:ts",
+    "build:all": "npm run build && npm run build:ts",
     "full-test": "mocha --timeout 10000 --require coffeescript/register test/*.coffee",
     "prepublishOnly": "napi prepublish -t npm",
     "preversion": "napi build --platform && git add .",

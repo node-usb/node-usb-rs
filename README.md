@@ -2,7 +2,7 @@
 
 npm run clean
 npm i
-npm run build
+npm run build:all
 
 
 
