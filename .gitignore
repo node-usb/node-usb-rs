@@ -2,6 +2,7 @@
 node_modules
 dist
 target
+npm
 index.js
 index.d.ts
 *.node

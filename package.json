@@ -48,7 +48,8 @@
     "full-test": "mocha --timeout 10000 --require coffeescript/register test/*.coffee",
     "prepublishOnly": "napi prepublish -t npm",
     "preversion": "napi build --platform && git add .",
-    "version": "napi version"
+    "version": "napi version",
+    "create-npm-dirs": "napi create-npm-dirs"
   },
   "dependencies": {
     "@types/w3c-web-usb": "^1.0.13"

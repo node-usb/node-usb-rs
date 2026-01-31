@@ -1,4 +1,4 @@
-name: CI
+name: ci
 env:
   DEBUG: napi:*
   APP_NAME: usb
@@ -123,7 +123,7 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: create npm dirs
-        run: npm run napi create-npm-dirs
+        run: npm run create-npm-dirs
       - name: Download all artifacts
         uses: actions/download-artifact@v7
         with:
