@@ -50,12 +50,6 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             command: --target armv7-unknown-linux-gnueabihf --use-napi-cross
           - host: ubuntu-latest
-            target: aarch64-linux-android
-            command: --target aarch64-linux-android
-          - host: ubuntu-latest
-            target: armv7-linux-androideabi
-            command: --target armv7-linux-androideabi
-          - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
             command: --target aarch64-unknown-linux-musl -x
           - host: windows-latest
@@ -112,50 +106,6 @@ jobs:
           path: |
             ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
-  build-freebsd:
-    runs-on: ubuntu-latest
-    name: Build FreeBSD
-    steps:
-      - uses: actions/checkout@v6
-      - name: Build
-        id: build
-        uses: cross-platform-actions/action@v0.32.0
-        env:
-          DEBUG: napi:*
-          RUSTUP_IO_THREADS: 1
-        with:
-          operating_system: freebsd
-          version: '14.3'
-          memory: 8G
-          cpu_count: 3
-          environment_variables: DEBUG RUSTUP_IO_THREADS
-          shell: bash
-          run: |
-            sudo pkg install -y -f curl node libnghttp2 npm cmake
-            curl https://sh.rustup.rs -sSf --output rustup.sh
-            sh rustup.sh -y --profile minimal --default-toolchain stable
-            source "$HOME/.cargo/env"
-            echo "~~~~ rustc --version ~~~~"
-            rustc --version
-            echo "~~~~ node -v ~~~~"
-            node -v
-            echo "~~~~ npm --version ~~~~"
-            npm --version
-            pwd
-            ls -lah
-            whoami
-            env
-            freebsd-version
-            npm install
-            npm run build
-            rm -rf node_modules
-            rm -rf target
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: bindings-freebsd
-          path: ${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -164,7 +114,6 @@ jobs:
       id-token: write
     needs:
       - build
-      - build-freebsd
     steps:
       - uses: actions/checkout@v6
       - name: Setup node
