@@ -27,40 +27,40 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: npm run build --target x86_64-apple-darwin
+            command: --target x86_64-apple-darwin
           - host: windows-latest
-            build: npm run build --target x86_64-pc-windows-msvc
+            command: --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: windows-latest
-            build: npm run build --target i686-pc-windows-msvc
+            command: --target i686-pc-windows-msvc
             target: i686-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: npm run build --target x86_64-unknown-linux-gnu --use-napi-cross
+            command: --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: npm run build --target x86_64-unknown-linux-musl -x
+            command: --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: npm run build --target aarch64-apple-darwin
+            command: --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            build: npm run build --target aarch64-unknown-linux-gnu --use-napi-cross
+            command: --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            build: npm run build --target armv7-unknown-linux-gnueabihf --use-napi-cross
+            command: --target armv7-unknown-linux-gnueabihf --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-linux-android
-            build: npm run build --target aarch64-linux-android
+            command: --target aarch64-linux-android
           - host: ubuntu-latest
             target: armv7-linux-androideabi
-            build: npm run build --target armv7-linux-androideabi
+            command: --target armv7-linux-androideabi
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            build: npm run build --target aarch64-unknown-linux-musl -x
+            command: --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: npm run build --target aarch64-pc-windows-msvc
+            command: --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -103,7 +103,7 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Build
-        run: ${{ matrix.settings.build }}
+        run: npm run build -- ${{ matrix.settings.command }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v6
