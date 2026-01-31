@@ -12,23 +12,6 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
     (major, minor, sub)
 }
 
-pub struct HandleInner(pub nusb::DeviceId);
-
-#[napi]
-pub struct Handle {
-    inner: HandleInner,
-}
-
-impl Handle {
-    pub fn from_nusb(id: nusb::DeviceId) -> Self {
-        Handle { inner: HandleInner(id) }
-    }
-
-    pub fn to_nusb(&self) -> nusb::DeviceId {
-        self.inner.0
-    }
-}
-
 #[napi(object, js_name = "USBEndpoint")]
 pub struct UsbEndpoint {
     #[napi(writable = false)]
@@ -220,8 +203,8 @@ impl UsbDevice {
     }
 
     #[napi(getter, enumerable = false, configurable = false)]
-    pub fn handle(&self) -> Handle {
-        Handle::from_nusb(self.device_info.id())
+    pub fn handle(&self) -> String {
+        format!("{:?}", self.device_info.id())
     }
 
     #[napi(getter)]

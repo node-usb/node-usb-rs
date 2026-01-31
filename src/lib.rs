@@ -6,12 +6,12 @@ use futures_lite::StreamExt;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
-use webusb_device::{Handle, UsbDevice};
+use webusb_device::{UsbDevice};
 
 #[napi]
 pub struct Emitter {
     attachCallback: Option<ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>>,
-    detachCallback: Option<ThreadsafeFunction<Handle, (), Handle, napi::Status, false>>,
+    detachCallback: Option<ThreadsafeFunction<String, (), String, napi::Status, false>>,
 }
 
 #[napi]
@@ -37,7 +37,7 @@ impl Emitter {
                 }
                 HotplugEvent::Disconnected(id) => {
                     if let Some(callback) = &self.detachCallback {
-                        let handle = Handle::from_nusb(id);
+                        let handle = format!("{:?}", id);
                         callback.call(handle, ThreadsafeFunctionCallMode::NonBlocking);
                     }
                 }
@@ -56,12 +56,12 @@ impl Emitter {
     }
 
     #[napi]
-    pub fn addDetach(&mut self, callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
+    pub fn addDetach(&mut self, callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
         self.detachCallback = Some(callback);
     }
 
     #[napi]
-    pub fn removeDetach(&mut self, _callback: ThreadsafeFunction<Handle, (), Handle, napi::Status, false>) {
+    pub fn removeDetach(&mut self, _callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
         self.detachCallback = None;
     }
 }

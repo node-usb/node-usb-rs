@@ -2,6 +2,9 @@ assert = require('assert')
 util = require('util')
 webusb = require('../dist').webusb
 WebUSB = require('../dist').WebUSB
+getDeviceList = require('../dist').getDeviceList
+findByIds = require('../dist').findByIds
+findBySerialNumber = require('../dist').findBySerialNumber
 
 if typeof gc is 'function'
     # running with --expose-gc, do a sweep between tests so valgrind blames the right one
@@ -235,3 +238,16 @@ describe 'Transfers', ->
 
     after ->
         device.close()
+
+describe 'helpers', ->
+    it 'should getDeviceList', ->
+        devs = await getDeviceList()
+        assert.ok(devs.length > 0, "Demo device is not attached")
+
+    it 'should findByIds', ->
+        dev = await findByIds(0x59e3, 0x0a23)
+        assert.ok(dev, "Demo device is not attached")
+
+    it 'should findBySerialNumber', ->
+        dev = await findBySerialNumber('TEST_DEVICE')
+        assert.ok(dev, "Demo device is not attached")

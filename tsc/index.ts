@@ -1,4 +1,4 @@
-import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter, Handle } from '../index.js'
+import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter } from '../index.js'
 import { EventEmitter } from 'events';
 
 /**
@@ -104,14 +104,12 @@ const augmentDevice = (device: UsbDevice): USBDevice => {
     return device as unknown as USBDevice;
 };
 
-const clone = (obj: any): any => structuredClone(JSON.parse(JSON.stringify(obj)));
-
 class WebUSB implements USB {
 
     protected nativeEmitter = new Emitter();
     protected emitter = new EventEmitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
-    protected knownDevices: Map<Handle, USBDevice> = new Map();
+    protected knownDevices: Map<string, USBDevice> = new Map();
 
     constructor(private options: USBOptions = {}) {
         const deviceConnectCallback = async (device: UsbDevice) => {
@@ -128,11 +126,10 @@ class WebUSB implements USB {
             }
         };
 
-        const deviceDisconnectCallback = async (handle: Handle) => {
+        const deviceDisconnectCallback = async (handle: string) => {
             // When disconnected, emit an event if the device was a known allowed device
             if (this.knownDevices.has(handle)) {
                 const webDevice = this.knownDevices.get(handle);
-
                 if (webDevice && this.isAuthorisedDevice(webDevice)) {
                     const event = {
                         type: 'disconnect',
@@ -154,6 +151,8 @@ class WebUSB implements USB {
             if (event === 'connect') {
                 this.nativeEmitter.addAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
+                // Ensure we know the current devices
+                this.loadDevices();
                 this.nativeEmitter.addDetach(deviceDisconnectCallback);
             }
         });
@@ -307,13 +306,13 @@ class WebUSB implements USB {
         nativeDevices = this.quickFilter(nativeDevices, preFilters);
 
         const devices: USBDevice[] = [];
-        const refreshedKnownDevices = new Map<Handle, USBDevice>();
+        const refreshedKnownDevices = new Map<string, USBDevice>();
 
 
         for (const nativeDevice of nativeDevices) {
             const device = augmentDevice(nativeDevice);
             devices.push(device);
-            refreshedKnownDevices.set(nativeDevice.handle, clone(device));
+            refreshedKnownDevices.set(nativeDevice.handle, device);
         }
 
         this.knownDevices = refreshedKnownDevices;
