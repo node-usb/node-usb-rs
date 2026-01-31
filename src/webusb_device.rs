@@ -228,7 +228,7 @@ impl UsbDevice {
             Some(device) => device.clone(),
             None => self._open().unwrap(),
         };
-        
+
         Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap()))
     }
 
@@ -291,15 +291,13 @@ impl UsbDevice {
     #[napi]
     pub async unsafe fn releaseInterface(&mut self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
-            Some(_device) => {
-                match &self.interfaces[interfaceNumber as usize] {
-                    Some(_interface) => {
-                        self.interfaces[interfaceNumber as usize] = None;
-                        Ok(())
-                    }
-                    None => Err(napi::Error::from_reason("releaseInterface error: not claimed")),
+            Some(_device) => match &self.interfaces[interfaceNumber as usize] {
+                Some(_interface) => {
+                    self.interfaces[interfaceNumber as usize] = None;
+                    Ok(())
                 }
-            }
+                None => Err(napi::Error::from_reason("releaseInterface error: not claimed")),
+            },
             None => Err(napi::Error::from_reason("releaseInterface error: invalid state")),
         }
     }
@@ -320,24 +318,26 @@ impl UsbDevice {
 
     #[napi(js_name = "nativeControlTransferIn")]
     pub async fn controlTransferIn(&self, setup: UsbControlTransferParameters, length: u16) -> Result<Option<Uint8Array>> {
-        match &self.device {
-            Some(device) => {
-                let result = device
+        let control_type = match setup.requestType.as_str() {
+            "standard" => nusb::transfer::ControlType::Standard,
+            "class" => nusb::transfer::ControlType::Class,
+            "vendor" => nusb::transfer::ControlType::Vendor,
+            _ => nusb::transfer::ControlType::Standard,
+        };
+        let recipient = match setup.recipient.as_str() {
+            "device" => nusb::transfer::Recipient::Device,
+            "interface" => nusb::transfer::Recipient::Interface,
+            "endpoint" => nusb::transfer::Recipient::Endpoint,
+            "other" => nusb::transfer::Recipient::Other,
+            _ => nusb::transfer::Recipient::Other,
+        };
+        match self.get_interface(recipient, setup.index) {
+            Some(interface) => {
+                let result = interface
                     .control_in(
                         nusb::transfer::ControlIn {
-                            control_type: match setup.requestType.as_str() {
-                                "standard" => nusb::transfer::ControlType::Standard,
-                                "class" => nusb::transfer::ControlType::Class,
-                                "vendor" => nusb::transfer::ControlType::Vendor,
-                                _ => nusb::transfer::ControlType::Standard,
-                            },
-                            recipient: match setup.recipient.as_str() {
-                                "device" => nusb::transfer::Recipient::Device,
-                                "interface" => nusb::transfer::Recipient::Interface,
-                                "endpoint" => nusb::transfer::Recipient::Endpoint,
-                                "other" => nusb::transfer::Recipient::Other,
-                                _ => nusb::transfer::Recipient::Other,
-                            },
+                            control_type,
+                            recipient,
                             request: setup.request,
                             value: setup.value,
                             index: setup.index,
@@ -355,25 +355,27 @@ impl UsbDevice {
 
     #[napi(js_name = "nativeControlTransferOut")]
     pub async fn controlTransferOut(&self, setup: UsbControlTransferParameters, data: Option<Uint8Array>) -> Result<u32> {
-        match &self.device {
-            Some(device) => {
+        let control_type = match setup.requestType.as_str() {
+            "standard" => nusb::transfer::ControlType::Standard,
+            "class" => nusb::transfer::ControlType::Class,
+            "vendor" => nusb::transfer::ControlType::Vendor,
+            _ => nusb::transfer::ControlType::Standard,
+        };
+        let recipient = match setup.recipient.as_str() {
+            "device" => nusb::transfer::Recipient::Device,
+            "interface" => nusb::transfer::Recipient::Interface,
+            "endpoint" => nusb::transfer::Recipient::Endpoint,
+            "other" => nusb::transfer::Recipient::Other,
+            _ => nusb::transfer::Recipient::Other,
+        };
+        match self.get_interface(recipient, setup.index) {
+            Some(interface) => {
                 let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
-                device
+                interface
                     .control_out(
                         nusb::transfer::ControlOut {
-                            control_type: match setup.requestType.as_str() {
-                                "standard" => nusb::transfer::ControlType::Standard,
-                                "class" => nusb::transfer::ControlType::Class,
-                                "vendor" => nusb::transfer::ControlType::Vendor,
-                                _ => nusb::transfer::ControlType::Standard,
-                            },
-                            recipient: match setup.recipient.as_str() {
-                                "device" => nusb::transfer::Recipient::Device,
-                                "interface" => nusb::transfer::Recipient::Interface,
-                                "endpoint" => nusb::transfer::Recipient::Endpoint,
-                                "other" => nusb::transfer::Recipient::Other,
-                                _ => nusb::transfer::Recipient::Other,
-                            },
+                            control_type,
+                            recipient,
                             request: setup.request,
                             value: setup.value,
                             index: setup.index,
@@ -457,6 +459,37 @@ impl UsbDevice {
         }
 
         Ok(())
+    }
+
+    fn get_interface(&self, recipient: nusb::transfer::Recipient, index: u16) -> Option<nusb::Interface> {
+        if recipient == nusb::transfer::Recipient::Interface {
+            // If recipient is interface and index matches a claimed interface number use that interface
+            if self.interfaces[index as usize].is_some() {
+                return self.interfaces[index as usize].clone();
+            }
+        }
+        if recipient == nusb::transfer::Recipient::Endpoint {
+            // If recipient is endpoint and index matches an endpoint address use the interface that owns that endpoint
+            for maybe_iface in &self.interfaces {
+                let iface = match maybe_iface {
+                    Some(i) => i,
+                    None => continue,
+                };
+
+                for endpoint in iface.descriptor().unwrap().endpoints() {
+                    if endpoint.address() == index as u8 {
+                        return Some(iface.clone());
+                    }
+                }
+            }
+        }
+
+        // Return any claimed interface
+        let maybe_iface = self.interfaces.iter().find_map(|x| x.clone());
+        if maybe_iface.is_some() {
+            return maybe_iface;
+        }
+        None
     }
 
     fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, endpointNumber: u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
