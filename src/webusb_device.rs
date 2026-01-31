@@ -224,10 +224,12 @@ impl UsbDevice {
 
     #[napi(getter)]
     pub unsafe fn configuration(&mut self) -> Option<UsbConfiguration> {
-        match &self.device {
-            Some(device) => Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap())),
-            None => None,
-        }
+        let device = match self.device.as_ref() {
+            Some(device) => device.clone(),
+            None => self._open().unwrap(),
+        };
+        
+        Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap()))
     }
 
     unsafe fn _open(&mut self) -> Result<nusb::Device> {
@@ -290,8 +292,13 @@ impl UsbDevice {
     pub async unsafe fn releaseInterface(&mut self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
             Some(_device) => {
-                self.interfaces[interfaceNumber as usize] = None;
-                Ok(())
+                match &self.interfaces[interfaceNumber as usize] {
+                    Some(_interface) => {
+                        self.interfaces[interfaceNumber as usize] = None;
+                        Ok(())
+                    }
+                    None => Err(napi::Error::from_reason("releaseInterface error: not claimed")),
+                }
             }
             None => Err(napi::Error::from_reason("releaseInterface error: invalid state")),
         }

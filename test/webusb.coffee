@@ -10,6 +10,19 @@ if typeof gc is 'function'
     # running with --expose-gc, do a sweep between tests so valgrind blames the right one
     afterEach -> gc()
 
+describe 'helpers', ->
+    it 'should getDeviceList', ->
+        devs = await getDeviceList()
+        assert.ok(devs.length > 0, "Demo device is not attached")
+
+    it 'should findByIds', ->
+        dev = await findByIds(0x59e3, 0x0a23)
+        assert.ok(dev, "Demo device is not attached")
+
+    it 'should findBySerialNumber', ->
+        dev = await findBySerialNumber('TEST_DEVICE')
+        assert.ok(dev, "Demo device is not attached")
+
 describe 'WebUSB Module', ->
     it 'should describe basic constants', ->
         assert.notEqual(webusb, undefined, "webusb must be undefined")
@@ -37,23 +50,6 @@ describe 'getDevices', ->
         assert.equal(l.length, 1)
         assert.notEqual(l[0], undefined)
         assert.deepEqual(l[0], device)
-
-describe 'WebUSB Hotplug', ->
-    it 'should detect disconnect', (done) ->
-        fn = (e) ->
-            assert.equal(e.device.serialNumber, "TEST_DEVICE")
-            webusb.removeEventListener 'disconnect', fn
-            done()
-        webusb.addEventListener 'disconnect', fn
-        console.log('\n--- DISCONNECT DEVICE ---\n')
-
-    it 'should detect connect', (done) ->
-        fn = (e) ->
-            assert.equal(e.device.serialNumber, "TEST_DEVICE")
-            webusb.removeEventListener 'connect', fn
-            done()
-        webusb.addEventListener 'connect', fn
-        console.log('\n--- CONNECT DEVICE ---\n')
 
 describe 'Device properties', ->
     device = null
@@ -172,16 +168,8 @@ describe 'Alternates', ->
         assert.doesNotReject(device.selectAlternateInterface(0, 0))
 
     after ->
+        await device.releaseInterface(0)
         device.close()
-
-describe 'Throwing Transfers', ->
-    device = null
-
-    before ->
-        device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
-
-    it 'should fail transfer unless opened', ->
-        assert.rejects(device.transferIn(1, 64), 'The device must be opened first')
 
 describe 'Transfers', ->
     device = null
@@ -195,8 +183,8 @@ describe 'Transfers', ->
 
     it 'should control transfer OUT', ->
         transferResult = await device.controlTransferOut({
-            requestType: 'device',
-            recipient: 'vendor',
+            requestType: 'vendor',
+            recipient: 'device',
             request: 0x81,
             value: 0,
             index: 0
@@ -207,8 +195,8 @@ describe 'Transfers', ->
 
     it 'should control transfer IN', ->
         transferResult = await device.controlTransferIn({
-            requestType: 'device',
-            recipient: 'vendor',
+            requestType: 'vendor',
+            recipient: 'device',
             request: 0x81,
             value: 0,
             index: 0
@@ -236,18 +224,32 @@ describe 'Transfers', ->
         expectedBuffer = Buffer.from(b2, 0, b2.byteLength);
         assert(resultBuffer.equals(expectedBuffer));
 
-    after ->
+    after -> 
+        await device.releaseInterface(0)
         device.close()
 
-describe 'helpers', ->
-    it 'should getDeviceList', ->
-        devs = await getDeviceList()
-        assert.ok(devs.length > 0, "Demo device is not attached")
+describe 'Throwing Transfers', ->
+    device = null
 
-    it 'should findByIds', ->
-        dev = await findByIds(0x59e3, 0x0a23)
-        assert.ok(dev, "Demo device is not attached")
+    before ->
+        device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
 
-    it 'should findBySerialNumber', ->
-        dev = await findBySerialNumber('TEST_DEVICE')
-        assert.ok(dev, "Demo device is not attached")
+    it 'should fail transfer unless opened', ->
+        assert.rejects(device.transferIn(1, 64), 'The device must be opened first')
+
+describe 'WebUSB Hotplug', ->
+    it 'should detect disconnect', (done) ->
+        fn = (e) ->
+            assert.equal(e.device.serialNumber, "TEST_DEVICE")
+            webusb.removeEventListener 'disconnect', fn
+            done()
+        webusb.addEventListener 'disconnect', fn
+        console.log('\n--- DISCONNECT DEVICE ---\n')
+
+    it 'should detect connect', (done) ->
+        fn = (e) ->
+            assert.equal(e.device.serialNumber, "TEST_DEVICE")
+            webusb.removeEventListener 'connect', fn
+            done()
+        webusb.addEventListener 'connect', fn
+        console.log('\n--- CONNECT DEVICE ---\n')
