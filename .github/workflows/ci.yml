@@ -30,6 +30,7 @@ env:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -133,6 +134,8 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: npm install
+      - name: Build TypeScript
+        run: npm run build:ts
       - name: create npm dirs
         run: npm run create-npm-dirs
       - name: Download all artifacts
@@ -160,7 +163,7 @@ jobs:
             Next)
               npm publish --access public --tag next
               ;;
-            None)
+            *)
               echo "Not a release, skipping publish"
               ;;
           esac
