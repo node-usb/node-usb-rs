@@ -23,6 +23,10 @@ env:
           - "Latest"
         default: "None"
 
+permissions:
+  id-token: write
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -149,7 +153,6 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_TYPE: ${{ github.event.inputs.release-type }}
         run: |
-          npm config set provenance true
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
 
           case "$RELEASE_TYPE" in
