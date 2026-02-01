@@ -3,6 +3,7 @@ node_modules
 dist
 target
 npm
+docs
 index.js
 index.d.ts
 *.node
