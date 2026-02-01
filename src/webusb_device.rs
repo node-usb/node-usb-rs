@@ -167,12 +167,6 @@ pub struct UsbDevice {
     pub deviceSubclass: u8,
     #[napi(writable = false)]
     pub deviceProtocol: u8,
-    #[napi(writable = false)]
-    pub manufacturerName: Option<String>,
-    #[napi(writable = false)]
-    pub productName: Option<String>,
-    #[napi(writable = false)]
-    pub serialNumber: Option<String>,
 }
 
 #[napi]
@@ -196,15 +190,63 @@ impl UsbDevice {
             deviceClass: device_info.class(),
             deviceSubclass: device_info.subclass(),
             deviceProtocol: device_info.protocol(),
-            manufacturerName: device_info.manufacturer_string().map(|s| s.to_string()),
-            productName: device_info.product_string().map(|s| s.to_string()),
-            serialNumber: device_info.serial_number().map(|s| s.to_string()),
         }
     }
 
-    #[napi(getter, enumerable = false, configurable = false)]
+    #[napi(getter)]
     pub fn handle(&self) -> String {
         format!("{:?}", self.device_info.id())
+    }
+
+    #[napi(getter)]
+    pub unsafe fn manufacturerName(&mut self) -> Option<String> {
+        match &self.device_info.manufacturer_string() {
+            Some(str) => Some(str.to_string()),
+            None => {
+                let device = match self.device.as_ref() {
+                    Some(device) => device.clone(),
+                    None => self._open().unwrap(),
+                };
+                match device.device_descriptor().manufacturer_string_index() {
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    None => None,
+                }
+            }
+        }
+    }
+
+    #[napi(getter)]
+    pub unsafe fn productName(&mut self) -> Option<String> {
+        match &self.device_info.product_string() {
+            Some(str) => Some(str.to_string()),
+            None => {
+                let device = match self.device.as_ref() {
+                    Some(device) => device.clone(),
+                    None => self._open().unwrap(),
+                };
+                match device.device_descriptor().product_string_index() {
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    None => None,
+                }
+            }
+        }
+    }
+
+    #[napi(getter)]
+    pub unsafe fn serialNumber(&mut self) -> Option<String> {
+        match &self.device_info.serial_number() {
+            Some(str) => Some(str.to_string()),
+            None => {
+                let device = match self.device.as_ref() {
+                    Some(device) => device.clone(),
+                    None => self._open().unwrap(),
+                };
+                match device.device_descriptor().serial_number_string_index() {
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    None => None,
+                }
+            }
+        }
     }
 
     #[napi(getter)]
