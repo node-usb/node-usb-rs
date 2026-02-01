@@ -140,6 +140,8 @@ https://wicg.github.io/webusb/
 # Development
 The library is based on native rust bindings wrapping the [nusb](https://docs.rs/nusb/latest/nusb) crate.
 
+Ensure you have a working rust environment, instructions for setting this up are avalable at https://rust-lang.org/tools/install/
+
 ## Setup
 
 ```bash
