@@ -40,7 +40,7 @@
     "hardware"
   ],
   "scripts": {
-    "clean": "git clean -fx ./dist ./target ./node_modules",
+    "clean": "git clean -fx ./dist ./target ./node_modules ./npm",
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release",
     "build:ts": "tsc",

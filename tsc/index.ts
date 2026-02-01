@@ -114,6 +114,7 @@ class WebUSB implements USB {
     constructor(private options: USBOptions = {}) {
         const deviceConnectCallback = async (device: UsbDevice) => {
             const webDevice = augmentDevice(device);
+            this.knownDevices.set(device.handle, webDevice);
 
             // When connected, emit an event if it is an allowed device
             if (webDevice && this.isAuthorisedDevice(webDevice)) {
@@ -138,10 +139,11 @@ class WebUSB implements USB {
 
                     this.emitter.emit('disconnect', event);
                 }
+                this.knownDevices.delete(handle);
             }
         };
 
-        this.emitter.on('newListener', event => {
+        this.emitter.on('newListener', async event => {
             const listenerCount = this.emitter.listenerCount(event);
 
             if (listenerCount !== 0) {
@@ -152,7 +154,12 @@ class WebUSB implements USB {
                 this.nativeEmitter.addAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
                 // Ensure we know the current devices
-                this.loadDevices();
+                this.knownDevices.clear();
+                const devices = await nativeGetDeviceList();
+                devices.forEach(device => {
+                    this.knownDevices.set(device.handle, augmentDevice(device));
+                });
+
                 this.nativeEmitter.addDetach(deviceDisconnectCallback);
             }
         });
@@ -167,6 +174,7 @@ class WebUSB implements USB {
             if (event === 'connect') {
                 this.nativeEmitter.removeAttach(deviceConnectCallback);
             } else if (event === 'disconnect') {
+                this.knownDevices.clear();
                 this.nativeEmitter.removeDetach(deviceDisconnectCallback);
             }
         });
@@ -300,27 +308,15 @@ class WebUSB implements USB {
     }
 
     private async loadDevices(preFilters?: USBDeviceFilter[]): Promise<USBDevice[]> {
-        let nativeDevices = await nativeGetDeviceList();
+        let devices = await getDeviceList();
 
         // Pre-filter devices
-        nativeDevices = this.quickFilter(nativeDevices, preFilters);
-
-        const devices: USBDevice[] = [];
-        const refreshedKnownDevices = new Map<string, USBDevice>();
-
-
-        for (const nativeDevice of nativeDevices) {
-            const device = augmentDevice(nativeDevice);
-            devices.push(device);
-            refreshedKnownDevices.set(nativeDevice.handle, device);
-        }
-
-        this.knownDevices = refreshedKnownDevices;
+        devices = this.quickFilter(devices, preFilters);
         return devices;
     }
 
     // Undertake quick filter on devices before creating WebUSB devices if possible
-    private quickFilter(devices: UsbDevice[], preFilters?: USBDeviceFilter[]): UsbDevice[] {
+    private quickFilter(devices: USBDevice[], preFilters?: USBDeviceFilter[]): USBDevice[] {
         if (!preFilters || !preFilters.length) {
             return devices;
         }
