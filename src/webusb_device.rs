@@ -318,10 +318,13 @@ impl UsbDevice {
                     // Unsupported, as per WebUSB spec on Windows
                     Ok(())
                 }
-                device
-                    .set_configuration(configurationValue)
-                    .wait()
-                    .map_err(|e| napi::Error::from_reason(format!("selectConfiguration error: {e}")))
+                #[cfg(not(windows))]
+                {
+                    device
+                        .set_configuration(configurationValue)
+                        .wait()
+                        .map_err(|e| napi::Error::from_reason(format!("selectConfiguration error: {e}")))
+                }
             }
             None => Err(napi::Error::from_reason("selectConfiguration error: invalid state")),
         }
