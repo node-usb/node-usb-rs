@@ -4,18 +4,14 @@ env:
   APP_NAME: usb
   MACOSX_DEPLOYMENT_TARGET: '10.13'
   CARGO_INCREMENTAL: '1'
+
 'on':
   push:
     branches:
       - main
-    tags-ignore:
-      - '**'
-    paths-ignore:
-      - '**/*.md'
-      - LICENSE
-      - '**/*.gitignore'
-      - docs/**
-  pull_request: null
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       release-type:
@@ -135,7 +131,7 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Build TypeScript
-        run: npm run build:ts
+        run: npm run build:all
       - name: create npm dirs
         run: npm run create-npm-dirs
       - name: Download all artifacts
