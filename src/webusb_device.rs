@@ -213,16 +213,6 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn configurations(&mut self) -> Vec<UsbConfiguration> {
-        let device = match self.device.as_ref() {
-            Some(device) => device.clone(),
-            None => self._open().unwrap(),
-        };
-
-        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect()
-    }
-
-    #[napi(getter)]
     pub unsafe fn configuration(&mut self) -> Option<UsbConfiguration> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
@@ -230,6 +220,16 @@ impl UsbDevice {
         };
 
         Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap()))
+    }
+
+    #[napi(getter)]
+    pub unsafe fn configurations(&mut self) -> Vec<UsbConfiguration> {
+        let device = match self.device.as_ref() {
+            Some(device) => device.clone(),
+            None => self._open().unwrap(),
+        };
+
+        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect()
     }
 
     unsafe fn _open(&mut self) -> Result<nusb::Device> {
@@ -265,10 +265,22 @@ impl UsbDevice {
     #[napi]
     pub async fn selectConfiguration(&self, configurationValue: u8) -> Result<()> {
         match &self.device {
-            Some(device) => device
-                .set_configuration(configurationValue)
-                .wait()
-                .map_err(|e| napi::Error::from_reason(format!("selectConfiguration error: {e}"))),
+            Some(device) => {
+                let found = device.configurations().any(|c| c.configuration_value() == configurationValue);
+                if !found {
+                    return Err(napi::Error::from_reason("selectConfiguration error: invalid configuration"));
+                }
+
+                #[cfg(windows)]
+                {
+                    // Unsupported, as per WebUSB spec on Windows
+                    Ok(())
+                }
+                device
+                    .set_configuration(configurationValue)
+                    .wait()
+                    .map_err(|e| napi::Error::from_reason(format!("selectConfiguration error: {e}")))
+            }
             None => Err(napi::Error::from_reason("selectConfiguration error: invalid state")),
         }
     }
