@@ -1,5 +1,4 @@
 import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter } from '../index.js'
-import { EventEmitter } from 'events';
 
 /**
  * USB Options
@@ -35,6 +34,15 @@ class NamedError extends Error {
     public constructor(message: string, name: string) {
         super(message);
         this.name = name;
+    }
+}
+
+class ConnectionEvent extends Event implements USBConnectionEvent {
+    constructor(type: string, protected eventInitDict: USBConnectionEventInit) {
+        super(type, eventInitDict);
+    }
+    public get device(): USBDevice {
+        return this.eventInitDict.device;
     }
 }
 
@@ -104,82 +112,63 @@ const augmentDevice = (device: UsbDevice): USBDevice => {
     return device as unknown as USBDevice;
 };
 
-class WebUSB implements USB {
+interface WebUSB {
+    addEventListener(
+        type: "connect" | "disconnect",
+        listener: (this: this, ev: USBConnectionEvent) => any,
+        useCapture?: boolean,
+    ): void;
+    addEventListener(
+        type: string,
+        listener: EventListenerOrEventListenerObject | null,
+        options?: boolean | AddEventListenerOptions,
+    ): void;
+    removeEventListener(
+        type: "connect" | "disconnect",
+        callback: (this: this, ev: USBConnectionEvent) => any,
+        useCapture?: boolean,
+    ): void;
+    removeEventListener(
+        type: string,
+        callback: EventListenerOrEventListenerObject | null,
+        options?: EventListenerOptions | boolean,
+    ): void;
+}
+
+class WebUSB extends EventTarget implements USB {
 
     protected nativeEmitter = new Emitter();
-    protected emitter = new EventEmitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
     protected knownDevices: Map<string, USBDevice> = new Map();
 
     constructor(private options: USBOptions = {}) {
-        const deviceConnectCallback = async (device: UsbDevice) => {
-            const webDevice = augmentDevice(device);
-            this.knownDevices.set(device.handle, webDevice);
+        super();
+
+        const deviceConnectCallback = async (nativeDevice: UsbDevice) => {
+            const device = augmentDevice(nativeDevice);
+            this.knownDevices.set(nativeDevice.handle, device);
 
             // When connected, emit an event if it is an allowed device
-            if (webDevice && this.isAuthorisedDevice(webDevice)) {
-                const event = {
-                    type: 'connect',
-                    device: webDevice
-                };
-
-                this.emitter.emit('connect', event);
+            if (device && this.isAuthorisedDevice(device)) {
+                this.dispatchEvent(new ConnectionEvent('connect', { device }) );
             }
         };
 
         const deviceDisconnectCallback = async (handle: string) => {
             // When disconnected, emit an event if the device was a known allowed device
             if (this.knownDevices.has(handle)) {
-                const webDevice = this.knownDevices.get(handle);
-                if (webDevice && this.isAuthorisedDevice(webDevice)) {
-                    const event = {
-                        type: 'disconnect',
-                        device: webDevice
-                    };
-
-                    this.emitter.emit('disconnect', event);
+                const device = this.knownDevices.get(handle)!;
+                if (device && this.isAuthorisedDevice(device)) {
+                    this.dispatchEvent(new ConnectionEvent('disconnect', { device }));
                 }
                 this.knownDevices.delete(handle);
             }
         };
 
-        this.emitter.on('newListener', async event => {
-            const listenerCount = this.emitter.listenerCount(event);
-
-            if (listenerCount !== 0) {
-                return;
-            }
-
-            if (event === 'connect') {
-                this.nativeEmitter.addAttach(deviceConnectCallback);
-            } else if (event === 'disconnect') {
-                // Ensure we know the current devices
-                this.knownDevices.clear();
-                const devices = await nativeGetDeviceList();
-                devices.forEach(device => {
-                    this.knownDevices.set(device.handle, augmentDevice(device));
-                });
-
-                this.nativeEmitter.addDetach(deviceDisconnectCallback);
-            }
-        });
-
-        this.emitter.on('removeListener', event => {
-            const listenerCount = this.emitter.listenerCount(event);
-
-            if (listenerCount !== 0) {
-                return;
-            }
-
-            if (event === 'connect') {
-                this.nativeEmitter.removeAttach(deviceConnectCallback);
-            } else if (event === 'disconnect') {
-                this.knownDevices.clear();
-                this.nativeEmitter.removeDetach(deviceDisconnectCallback);
-            }
-        });
-
         this.nativeEmitter.start();
+        this.nativeEmitter.addAttach(deviceConnectCallback);
+        this.nativeEmitter.addDetach(deviceDisconnectCallback);
+        nativeGetDeviceList().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, augmentDevice(device))));
     }
 
     private _onconnect: ((ev: USBConnectionEvent) => void) | undefined;
@@ -206,23 +195,6 @@ class WebUSB implements USB {
             this._ondisconnect = fn;
             this.addEventListener('disconnect', this._ondisconnect);
         }
-    }
-
-    public addEventListener(type: 'connect' | 'disconnect', listener: (this: this, ev: USBConnectionEvent) => void): void;
-    public addEventListener(type: 'connect' | 'disconnect', listener: EventListener): void;
-    public addEventListener(type: string, listener: (ev: USBConnectionEvent) => void): void {
-        this.emitter.addListener(type, listener);
-    }
-
-    public removeEventListener(type: 'connect' | 'disconnect', callback: (this: this, ev: USBConnectionEvent) => void): void;
-    public removeEventListener(type: 'connect' | 'disconnect', callback: EventListener): void;
-    public removeEventListener(type: string, callback: (this: this, ev: USBConnectionEvent) => void): void {
-        this.emitter.removeListener(type, callback);
-    }
-
-    public dispatchEvent(_event: Event): boolean {
-        // Don't dispatch from here
-        return false;
     }
 
     /**
