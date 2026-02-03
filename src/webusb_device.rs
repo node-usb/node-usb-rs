@@ -4,6 +4,7 @@ use nusb::{descriptors::language_id::US_ENGLISH, transfer::Buffer, transfer::Bul
 use std::time::Duration;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
+const DESC_TIMEOUT: Duration = Duration::from_millis(100);
 
 fn decode_version(version: u16) -> (u8, u8, u8) {
     let major: u8 = (version >> 8) as u8;
@@ -63,7 +64,7 @@ pub struct UsbAlternateInterface {
 impl UsbAlternateInterface {
     pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Self {
         let interfaceName = match iface.string_index() {
-            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
             None => None,
         };
 
@@ -114,7 +115,7 @@ pub struct UsbConfiguration {
 impl UsbConfiguration {
     pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Self {
         let configurationName = match config.string_index() {
-            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
             None => None,
         };
 
@@ -208,7 +209,7 @@ impl UsbDevice {
                     None => self._open().unwrap(),
                 };
                 match device.device_descriptor().manufacturer_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
                     None => None,
                 }
             }
@@ -225,7 +226,7 @@ impl UsbDevice {
                     None => self._open().unwrap(),
                 };
                 match device.device_descriptor().product_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
                     None => None,
                 }
             }
@@ -242,7 +243,7 @@ impl UsbDevice {
                     None => self._open().unwrap(),
                 };
                 match device.device_descriptor().serial_number_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, Duration::from_millis(100)).wait().unwrap()),
+                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
                     None => None,
                 }
             }
@@ -374,7 +375,7 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeControlTransferIn")]
-    pub async fn controlTransferIn(&self, setup: UsbControlTransferParameters, length: u16) -> Result<Option<Uint8Array>> {
+    pub async fn controlTransferIn(&self, setup: UsbControlTransferParameters, timeout: u32, length: u16) -> Result<Option<Uint8Array>> {
         let control_type = match setup.requestType.as_str() {
             "standard" => nusb::transfer::ControlType::Standard,
             "class" => nusb::transfer::ControlType::Class,
@@ -400,7 +401,7 @@ impl UsbDevice {
                             index: setup.index,
                             length,
                         },
-                        Duration::from_millis(100),
+                        Duration::from_millis(timeout as u64),
                     )
                     .wait()
                     .map_err(|e| napi::Error::from_reason(format!("controlTransferIn error: {e}")))?;
@@ -411,7 +412,7 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeControlTransferOut")]
-    pub async fn controlTransferOut(&self, setup: UsbControlTransferParameters, data: Option<Uint8Array>) -> Result<u32> {
+    pub async fn controlTransferOut(&self, setup: UsbControlTransferParameters, timeout: u32, data: Option<Uint8Array>) -> Result<u32> {
         let control_type = match setup.requestType.as_str() {
             "standard" => nusb::transfer::ControlType::Standard,
             "class" => nusb::transfer::ControlType::Class,
@@ -438,7 +439,7 @@ impl UsbDevice {
                             index: setup.index,
                             data: &bytes,
                         },
-                        Duration::from_millis(100),
+                        Duration::from_millis(timeout as u64),
                     )
                     .wait()
                     .map_err(|e| napi::Error::from_reason(format!("controlTransferOut error: {e}")))?;
@@ -449,13 +450,13 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeTransferIn")]
-    pub async fn transferIn(&self, endpointNumber: u8, length: u32) -> Result<Option<Uint8Array>> {
+    pub async fn transferIn(&self, endpointNumber: u8, timeout: u32, length: u32) -> Result<Option<Uint8Array>> {
         match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
             Some(mut endpoint) => {
                 let packet_size = endpoint.max_packet_size();
                 let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
                 let buf = Buffer::new(req);
-                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(100));
+                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
                 completion.status.map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
                 let mut v = completion.buffer.into_vec();
                 v.truncate(completion.actual_len.min(length as usize));
@@ -468,12 +469,12 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeTransferOut")]
-    pub async fn transferOut(&self, endpointNumber: u8, data: Uint8Array) -> Result<u32> {
+    pub async fn transferOut(&self, endpointNumber: u8, timeout:u32, data: Uint8Array) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(mut endpoint) => {
                 let mut buf = Buffer::new(data.len());
                 buf.extend_from_slice(&data);
-                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(100));
+                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
                 completion.status.map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
                 return Ok(completion.actual_len as u32);
             }
