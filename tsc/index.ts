@@ -164,6 +164,16 @@ interface WebUSB {
     ): void;
 }
 
+/**
+ * WebUSB class
+ *
+ * ### Events
+ *
+ * | Name | Event | Description |
+ * | ---- | ----- | ----------- |
+ * | `connect` | {@link USBConnectionEvent} | Device connected |
+ * | `disconnect` | {@link USBConnectionEvent} | Device disconnected |
+ */
 class WebUSB extends EventTarget implements USB {
 
     protected nativeEmitter = new Emitter();
@@ -442,6 +452,9 @@ const findBySerialNumber = async (serialNumber: string, timeout = DEFAULT_TIMEOU
     return device ? augmentDevice(device, timeout) : undefined;
 };
 
+/**
+ * Default WebUSB object (mimics navigator.usb)
+ */
 const webusb = typeof navigator !== 'undefined' && navigator.usb ? navigator.usb : new WebUSB();
 
 export {
