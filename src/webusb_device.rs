@@ -13,6 +13,13 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
     (major, minor, sub)
 }
 
+fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Option<String> {
+    match index {
+        Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
+        None => None,
+    }
+}
+
 #[napi(object, js_name = "USBEndpoint")]
 pub struct UsbEndpoint {
     #[napi(writable = false)]
@@ -63,17 +70,12 @@ pub struct UsbAlternateInterface {
 
 impl UsbAlternateInterface {
     pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Self {
-        let interfaceName = match iface.string_index() {
-            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-            None => None,
-        };
-
         Self {
             alternateSetting: iface.alternate_setting(),
             interfaceClass: iface.class(),
             interfaceSubclass: iface.subclass(),
             interfaceProtocol: iface.protocol(),
-            interfaceName,
+            interfaceName: get_string(device, iface.string_index()),
             endpoints: iface.endpoints().map(|endpoint| UsbEndpoint::new(endpoint)).collect(),
         }
     }
@@ -114,16 +116,11 @@ pub struct UsbConfiguration {
 
 impl UsbConfiguration {
     pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Self {
-        let configurationName = match config.string_index() {
-            Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-            None => None,
-        };
-
         let interfaces = config.interfaces().map(|iface| UsbInterface::new(&usb_device, &device, iface)).collect();
 
         Self {
             configurationValue: config.configuration_value(),
-            configurationName,
+            configurationName: get_string(device, config.string_index()),
             interfaces,
         }
     }
@@ -229,10 +226,8 @@ impl UsbDevice {
                     Some(device) => device.clone(),
                     None => self._open().unwrap(),
                 };
-                match device.device_descriptor().manufacturer_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-                    None => None,
-                }
+
+                get_string(&device, device.device_descriptor().manufacturer_string_index())
             }
         }
     }
@@ -246,10 +241,8 @@ impl UsbDevice {
                     Some(device) => device.clone(),
                     None => self._open().unwrap(),
                 };
-                match device.device_descriptor().product_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-                    None => None,
-                }
+
+                get_string(&device, device.device_descriptor().product_string_index())
             }
         }
     }
@@ -263,10 +256,8 @@ impl UsbDevice {
                     Some(device) => device.clone(),
                     None => self._open().unwrap(),
                 };
-                match device.device_descriptor().serial_number_string_index() {
-                    Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-                    None => None,
-                }
+
+                get_string(&device, device.device_descriptor().serial_number_string_index())
             }
         }
     }
