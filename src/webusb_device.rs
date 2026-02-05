@@ -172,7 +172,7 @@ pub struct UsbDevice {
     #[napi(writable = false)]
     pub address: u8,
     #[napi(writable = false)]
-    pub speed: String,
+    pub speed: Option<String>,
 }
 
 #[napi]
@@ -200,14 +200,14 @@ impl UsbDevice {
             address: device_info.device_address(),
             speed: match device_info.speed() {
                 Some(speed) => match speed {
-                    nusb::Speed::Low => "Low".to_string(),
-                    nusb::Speed::Full => "Full".to_string(),
-                    nusb::Speed::High => "High".to_string(),
-                    nusb::Speed::Super => "Super".to_string(),
-                    nusb::Speed::SuperPlus => "SuperPlus".to_string(),
-                    _ => "unknown".to_string(),
+                    nusb::Speed::Low => Some("Low".to_string()),
+                    nusb::Speed::Full => Some("Full".to_string()),
+                    nusb::Speed::High => Some("High".to_string()),
+                    nusb::Speed::Super => Some("Super".to_string()),
+                    nusb::Speed::SuperPlus => Some("SuperPlus".to_string()),
+                    _ => None,
                 },
-                None => "unknown".to_string(),
+                None => None,
             },
         }
     }
@@ -532,20 +532,20 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async fn detachKernelDriver(&self, interface: u8) -> Result<()> {
+    pub async fn detachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
             Some(device) => device
-                .detach_kernel_driver(interface)
+                .detach_kernel_driver(interfaceNumber)
                 .map_err(|e| napi::Error::from_reason(format!("detachKernelDriver error: {e}"))),
             None => Err(napi::Error::from_reason("detachKernelDriver error: invalid state")),
         }
     }
 
     #[napi]
-    pub async fn attachKernelDriver(&self, interface: u8) -> Result<()> {
+    pub async fn attachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
             Some(device) => device
-                .attach_kernel_driver(interface)
+                .attach_kernel_driver(interfaceNumber)
                 .map_err(|e| napi::Error::from_reason(format!("attachKernelDriver error: {e}"))),
             None => Err(napi::Error::from_reason("attachKernelDriver error: invalid state")),
         }
