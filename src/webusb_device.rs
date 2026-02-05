@@ -168,6 +168,14 @@ pub struct UsbDevice {
     pub deviceSubclass: u8,
     #[napi(writable = false)]
     pub deviceProtocol: u8,
+
+    // Non WebUSB props
+    #[napi(writable = false)]
+    pub bus: String,
+    #[napi(writable = false)]
+    pub address: u8,
+    #[napi(writable = false)]
+    pub speed: String,
 }
 
 #[napi]
@@ -191,6 +199,19 @@ impl UsbDevice {
             deviceClass: device_info.class(),
             deviceSubclass: device_info.subclass(),
             deviceProtocol: device_info.protocol(),
+            bus: device_info.bus_id().to_string(),
+            address: device_info.device_address(),
+            speed: match device_info.speed() {
+                Some(speed) => match speed {
+                    nusb::Speed::Low => "Low".to_string(),
+                    nusb::Speed::Full => "Full".to_string(),
+                    nusb::Speed::High => "High".to_string(),
+                    nusb::Speed::Super => "Super".to_string(),
+                    nusb::Speed::SuperPlus => "SuperPlus".to_string(),
+                    _ => "unknown".to_string(),
+                },
+                None => "unknown".to_string(),
+            },
         }
     }
 
@@ -469,7 +490,7 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeTransferOut")]
-    pub async fn transferOut(&self, endpointNumber: u8, timeout:u32, data: Uint8Array) -> Result<u32> {
+    pub async fn transferOut(&self, endpointNumber: u8, timeout: u32, data: Uint8Array) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(mut endpoint) => {
                 let mut buf = Buffer::new(data.len());
@@ -517,6 +538,26 @@ impl UsbDevice {
         }
 
         Ok(())
+    }
+
+    #[napi]
+    pub async fn detachKernelDriver(&self, interface: u8) -> Result<()> {
+        match &self.device {
+            Some(device) => device
+                .detach_kernel_driver(interface)
+                .map_err(|e| napi::Error::from_reason(format!("detachKernelDriver error: {e}"))),
+            None => Err(napi::Error::from_reason("detachKernelDriver error: invalid state")),
+        }
+    }
+
+    #[napi]
+    pub async fn attachKernelDriver(&self, interface: u8) -> Result<()> {
+        match &self.device {
+            Some(device) => device
+                .attach_kernel_driver(interface)
+                .map_err(|e| napi::Error::from_reason(format!("attachKernelDriver error: {e}"))),
+            None => Err(napi::Error::from_reason("attachKernelDriver error: invalid state")),
+        }
     }
 
     fn get_interface(&self, recipient: nusb::transfer::Recipient, index: u16) -> Option<nusb::Interface> {
