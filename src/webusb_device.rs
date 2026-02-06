@@ -171,7 +171,7 @@ pub struct UsbDevice {
     pub bus: String,
     #[napi(writable = false)]
     pub address: u8,
-    #[napi(writable = false)]
+    #[napi(writable = false, ts_type = "USBSpeed")]
     pub speed: Option<String>,
 }
 
@@ -200,11 +200,11 @@ impl UsbDevice {
             address: device_info.device_address(),
             speed: match device_info.speed() {
                 Some(speed) => match speed {
-                    nusb::Speed::Low => Some("Low".to_string()),
-                    nusb::Speed::Full => Some("Full".to_string()),
-                    nusb::Speed::High => Some("High".to_string()),
-                    nusb::Speed::Super => Some("Super".to_string()),
-                    nusb::Speed::SuperPlus => Some("SuperPlus".to_string()),
+                    nusb::Speed::Low => Some("low".to_string()),
+                    nusb::Speed::Full => Some("full".to_string()),
+                    nusb::Speed::High => Some("high".to_string()),
+                    nusb::Speed::Super => Some("super".to_string()),
+                    nusb::Speed::SuperPlus => Some("superPlus".to_string()),
                     _ => None,
                 },
                 None => None,

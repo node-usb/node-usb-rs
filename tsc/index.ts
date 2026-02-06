@@ -1,4 +1,4 @@
-import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter } from '../index.js'
+import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter, USBSpeed } from '../index.js'
 
 const DEFAULT_TIMEOUT = 1000;
 
@@ -19,7 +19,7 @@ interface WebUSBDevice extends USBDevice {
     /**
      * The USB speed of the device (e.g. `Low`, `Full`, `High`, `Super`, `SuperPlus` or `undefined` if unknown)
      */
-    speed?: string;
+    speed?: USBSpeed;
 
     /**
      * Detaches the kernel driver from the specified interface number (Linux only)
