@@ -20,7 +20,7 @@ fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Opti
     }
 }
 
-#[napi(object, js_name = "USBEndpoint")]
+#[napi(object)]
 pub struct UsbEndpoint {
     #[napi(writable = false)]
     pub endpointNumber: u8,
@@ -52,7 +52,7 @@ impl UsbEndpoint {
     }
 }
 
-#[napi(object, js_name = "USBAlternateInterface")]
+#[napi(object)]
 pub struct UsbAlternateInterface {
     #[napi(writable = false)]
     pub alternateSetting: u8,
@@ -81,7 +81,7 @@ impl UsbAlternateInterface {
     }
 }
 
-#[napi(object, js_name = "USBInterface")]
+#[napi(object)]
 pub struct UsbInterface {
     #[napi(writable = false)]
     pub interfaceNumber: u8,
@@ -104,7 +104,7 @@ impl UsbInterface {
     }
 }
 
-#[napi(object, js_name = "USBConfiguration")]
+#[napi(object)]
 pub struct UsbConfiguration {
     #[napi(writable = false)]
     pub configurationValue: u8,
@@ -270,7 +270,7 @@ impl UsbDevice {
         self.device.is_some()
     }
 
-    #[napi(getter)]
+    #[napi(getter, ts_return_type = "USBConfiguration")]
     pub unsafe fn configuration(&mut self) -> Option<UsbConfiguration> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
@@ -280,7 +280,7 @@ impl UsbDevice {
         Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap()))
     }
 
-    #[napi(getter)]
+    #[napi(getter, ts_return_type = "Array<USBConfiguration>")]
     pub unsafe fn configurations(&mut self) -> Vec<UsbConfiguration> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
@@ -499,12 +499,12 @@ impl UsbDevice {
         }
     }
 
-    #[napi(ts_return_type = "Promise<USBIsochronousInTransferResult>")]
+    #[napi(js_name = "nativeIsochronousTransferIn", ts_return_type = "Promise<USBIsochronousInTransferResult>")]
     pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
     }
 
-    #[napi(ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
+    #[napi(js_name = "nativeIsochronousTransferOut", ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
     pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
     }

@@ -1,42 +1,82 @@
-import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter, USBSpeed } from '../index.js'
+import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter } from '../index.js'
 
+/**
+ * Hidden
+ */
 const DEFAULT_TIMEOUT = 1000;
 
 /**
- * Extended WebUSB Device
+ * Hidden
  */
-interface WebUSBDevice extends USBDevice {
-    /**
-     * The USB bus the device is connected to (e.g. `1-1`, `2-3.4`, etc.)
-     */
-    bus: string;
+const toUint8Array = (data: BufferSource): Uint8Array => {
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data);
+    }
 
-    /**
-     * The USB address the device is connected to
-     */
-    address: number;
+    // ArrayBufferView
+    return new Uint8Array(
+        data.buffer,
+        data.byteOffset,
+        data.byteLength
+    );
+};
 
-    /**
-     * The USB port numbers the device is connected through (e.g. `[1]`, `[3, 4]`, etc.)
-     */
-    ports: Array<number>
+/**
+ * Hidden
+ */
+UsbDevice.prototype.controlTransferIn = async function (setup: USBControlTransferParameters, length: number, timeout = DEFAULT_TIMEOUT): Promise<USBInTransferResult> {
+    const res = await this.nativeControlTransferIn(setup, timeout, length);
+    return {
+        data: res ? new DataView(res.buffer) : undefined,
+        status: res ? 'ok' : 'stall',
+    };
+};
 
-    /**
-     * The USB speed of the device (e.g. `Low`, `Full`, `High`, `Super`, `SuperPlus` or `undefined` if unknown)
-     */
-    speed?: USBSpeed;
+/**
+ * Hidden
+ */
+UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransferParameters, data: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
+    const res = await this.nativeControlTransferOut(setup, timeout, toUint8Array(data));
+    return {
+        bytesWritten: res,
+        status: res >= 0 ? 'ok' : 'stall',
+    };
+};
 
-    /**
-     * Detaches the kernel driver from the specified interface number (Linux only)
-     * @param interfaceNumber 
-     */
-    detachKernelDriver(interfaceNumber: number): Promise<void>;
+/**
+ * Hidden
+ */
+UsbDevice.prototype.transferIn = async function (endpointNumber: number, length: number, timeout = DEFAULT_TIMEOUT): Promise<USBInTransferResult> {
+    const res = await this.nativeTransferIn(endpointNumber, timeout, length);
+    return {
+        data: res ? new DataView(res.buffer) : undefined,
+        status: res ? 'ok' : 'stall',
+    };
+};
 
-    /**
-     * Attaches the kernel driver for the specified interface number (Linux only)
-     * @param interfaceNumber 
-     */
-    attachKernelDriver(interfaceNumber: number): Promise<void>;
+/**
+ * Hidden
+ */
+UsbDevice.prototype.transferOut = async function (endpointNumber: number, data: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
+    const res = await this.nativeTransferOut(endpointNumber, timeout, toUint8Array(data));
+    return {
+        bytesWritten: res,
+        status: res >= 0 ? 'ok' : 'stall',
+    };
+};
+
+/**
+ * Hidden
+ */
+UsbDevice.prototype.isochronousTransferIn = async function (_endpointNumber: number, _packetLengths: number[]): Promise<USBIsochronousInTransferResult> {
+    throw new Error('isochronousTransferIn error: method not implemented');
+}
+
+/**
+ * Hidden
+ */
+UsbDevice.prototype.isochronousTransferOut = async function (_endpointNumber: number, _data: BufferSource, _packetLengths: number[]): Promise<USBIsochronousOutTransferResult> {
+    throw new Error('isochronousTransferOut error: method not implemented');
 }
 
 /**
@@ -46,7 +86,7 @@ interface USBOptions {
     /**
      * Optional `device found` callback function to allow the user to select a device
      */
-    devicesFound?: (devices: WebUSBDevice[]) => Promise<WebUSBDevice | void>;
+    devicesFound?: (devices: UsbDevice[]) => Promise<UsbDevice | void>;
 
     /**
      * Optional array of preconfigured allowed devices
@@ -75,76 +115,10 @@ class ConnectionEvent extends Event implements USBConnectionEvent {
     constructor(type: string, protected eventInitDict: USBConnectionEventInit) {
         super(type, eventInitDict);
     }
-    public get device(): WebUSBDevice {
-        return this.eventInitDict.device as WebUSBDevice;
+    public get device(): UsbDevice {
+        return this.eventInitDict.device as UsbDevice;
     }
 }
-
-const augmentDevice = (device: UsbDevice, timeout: number): WebUSBDevice => {
-
-    const toUint8Array = (data: BufferSource): Uint8Array => {
-        if (data instanceof ArrayBuffer) {
-            return new Uint8Array(data);
-        }
-
-        // ArrayBufferView
-        return new Uint8Array(
-            data.buffer,
-            data.byteOffset,
-            data.byteLength
-        );
-    };
-
-    Object.defineProperty(device, 'controlTransferIn', {
-        enumerable: false,
-        configurable: false,
-        value: async function (setup: USBControlTransferParameters, length: number): Promise<USBInTransferResult> {
-            const res = await this.nativeControlTransferIn(setup, timeout, length);
-            return {
-                data: res ? new DataView(res.buffer) : undefined,
-                status: res ? 'ok' : 'stall',
-            };
-        },
-    });
-
-    Object.defineProperty(device, 'controlTransferOut', {
-        enumerable: false,
-        configurable: false,
-        value: async function (setup: USBControlTransferParameters, data: BufferSource): Promise<USBOutTransferResult> {
-            const res = await this.nativeControlTransferOut(setup, timeout, toUint8Array(data));
-            return {
-                bytesWritten: res,
-                status: res >= 0 ? 'ok' : 'stall',
-            };
-        },
-    });
-
-    Object.defineProperty(device, 'transferIn', {
-        enumerable: false,
-        configurable: false,
-        value: async function (endpointNumber: number, length: number): Promise<USBInTransferResult> {
-            const res = await this.nativeTransferIn(endpointNumber, timeout, length);
-            return {
-                data: res ? new DataView(res.buffer) : undefined,
-                status: res ? 'ok' : 'stall',
-            };
-        },
-    });
-
-    Object.defineProperty(device, 'transferOut', {
-        enumerable: false,
-        configurable: false,
-        value: async function (endpointNumber: number, data: BufferSource): Promise<USBOutTransferResult> {
-            const res = await this.nativeTransferOut(endpointNumber, timeout, toUint8Array(data));
-            return {
-                bytesWritten: res,
-                status: res >= 0 ? 'ok' : 'stall',
-            };
-        },
-    });
-
-    return device as unknown as WebUSBDevice;
-};
 
 interface WebUSB {
     addEventListener(
@@ -183,14 +157,13 @@ class WebUSB extends EventTarget implements USB {
 
     protected nativeEmitter = new Emitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
-    protected knownDevices: Map<string, WebUSBDevice> = new Map();
+    protected knownDevices: Map<string, UsbDevice> = new Map();
 
     constructor(private options: USBOptions = {}) {
         super();
 
-        const deviceConnectCallback = async (nativeDevice: UsbDevice) => {
-            const device = augmentDevice(nativeDevice, this.options.deviceTimeout || DEFAULT_TIMEOUT);
-            this.knownDevices.set(nativeDevice.handle, device);
+        const deviceConnectCallback = async (device: UsbDevice) => {
+            this.knownDevices.set(device.handle, device);
 
             // When connected, emit an event if it is an allowed device
             if (device && this.isAuthorisedDevice(device)) {
@@ -212,7 +185,7 @@ class WebUSB extends EventTarget implements USB {
         this.nativeEmitter.start();
         this.nativeEmitter.addAttach(deviceConnectCallback);
         this.nativeEmitter.addDetach(deviceDisconnectCallback);
-        nativeGetDeviceList().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, augmentDevice(device, this.options.deviceTimeout || DEFAULT_TIMEOUT))));
+        getDeviceList().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
     }
 
     private _onconnect: ((ev: USBConnectionEvent) => void) | undefined;
@@ -246,7 +219,7 @@ class WebUSB extends EventTarget implements USB {
      * @param options The options to use when scanning
      * @returns Promise containing the selected device
      */
-    public async requestDevice(options?: USBDeviceRequestOptions): Promise<WebUSBDevice> {
+    public async requestDevice(options?: USBDeviceRequestOptions): Promise<UsbDevice> {
         // Must have options
         if (!options) {
             throw new TypeError('requestDevice error: 1 argument required, but only 0 present');
@@ -314,7 +287,7 @@ class WebUSB extends EventTarget implements USB {
      * Gets all allowed Web USB devices which are connected
      * @returns Promise containing an array of devices
      */
-    public async getDevices(): Promise<WebUSBDevice[]> {
+    public async getDevices(): Promise<UsbDevice[]> {
         const preFilters = this.options.allowAllDevices ? undefined : this.options.allowedDevices;
 
         // Refresh devices and filter for allowed ones
@@ -323,7 +296,7 @@ class WebUSB extends EventTarget implements USB {
         return devices.filter(device => this.isAuthorisedDevice(device));
     }
 
-    private async loadDevices(preFilters?: USBDeviceFilter[]): Promise<WebUSBDevice[]> {
+    private async loadDevices(preFilters?: USBDeviceFilter[]): Promise<UsbDevice[]> {
         let devices = await getDeviceList();
 
         // Pre-filter devices
@@ -332,7 +305,7 @@ class WebUSB extends EventTarget implements USB {
     }
 
     // Undertake quick filter on devices before creating WebUSB devices if possible
-    private quickFilter(devices: WebUSBDevice[], preFilters?: USBDeviceFilter[]): WebUSBDevice[] {
+    private quickFilter(devices: UsbDevice[], preFilters?: USBDeviceFilter[]): UsbDevice[] {
         if (!preFilters || !preFilters.length) {
             return devices;
         }
@@ -352,7 +325,7 @@ class WebUSB extends EventTarget implements USB {
     }
 
     // Filter WebUSB devices
-    private filterDevice(device: WebUSBDevice, filters?: USBDeviceFilter[]): boolean {
+    private filterDevice(device: UsbDevice, filters?: USBDeviceFilter[]): boolean {
         if (!filters || !filters.length) {
             return true;
         }
@@ -407,7 +380,7 @@ class WebUSB extends EventTarget implements USB {
     }
 
     // Check whether a device is authorised
-    private isAuthorisedDevice(device: WebUSBDevice): boolean {
+    private isAuthorisedDevice(device: UsbDevice): boolean {
         // All devices are authorised
         if (this.options.allowAllDevices) {
             return true;
@@ -433,9 +406,9 @@ class WebUSB extends EventTarget implements USB {
 /**
  * Convenience method to get an array of all connected devices.
  */
-const getDeviceList = async (timeout = DEFAULT_TIMEOUT): Promise<WebUSBDevice[]> => {
+const getDeviceList = async (): Promise<UsbDevice[]> => {
     const devices = await nativeGetDeviceList();
-    return devices.map(device => augmentDevice(device, timeout));
+    return devices;
 };
 
 /**
@@ -443,18 +416,18 @@ const getDeviceList = async (timeout = DEFAULT_TIMEOUT): Promise<WebUSBDevice[]>
  * @param vid
  * @param pid
  */
-const findByIds = async (vid: number, pid: number, timeout = DEFAULT_TIMEOUT): Promise<WebUSBDevice | undefined> => {
+const findByIds = async (vid: number, pid: number): Promise<UsbDevice | undefined> => {
     const device = await nativeFindByIds(vid, pid);
-    return device ? augmentDevice(device, timeout) : undefined;
+    return device;
 };
 
 /**
  * Convenience method to get the device with the specified serial number, or `undefined` if no such device is present.
  * @param serialNumber
  */
-const findBySerialNumber = async (serialNumber: string, timeout = DEFAULT_TIMEOUT): Promise<WebUSBDevice | undefined> => {
+const findBySerialNumber = async (serialNumber: string): Promise<UsbDevice | undefined> => {
     const device = await nativeFindBySerialNumber(serialNumber);
-    return device ? augmentDevice(device, timeout) : undefined;
+    return device;
 };
 
 /**
