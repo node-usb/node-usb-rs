@@ -112,6 +112,8 @@ https://wicg.github.io/webusb/
 
 #### USBDevice
 
+##### WebUSB Features
+
 - [x] usbVersionMajor
 - [x] usbVersionMinor
 - [x] usbVersionSubminor
@@ -144,6 +146,15 @@ https://wicg.github.io/webusb/
 - [x] forget()
 - [ ] isochronousTransferIn()
 - [ ] isochronousTransferOut()
+
+##### Extended Features
+
+- [x] bus
+- [x] address
+- [x] ports
+- [x] speed
+- [x] detachKernelDriver() (Linux only)
+- [x] attachKernelDriver() (Linux only)
 
 #### Events
 
