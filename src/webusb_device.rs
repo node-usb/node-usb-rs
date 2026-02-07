@@ -171,6 +171,8 @@ pub struct UsbDevice {
     pub bus: String,
     #[napi(writable = false)]
     pub address: u8,
+    #[napi(writable = false)]
+    pub ports: Vec<u8>,
     #[napi(writable = false, ts_type = "USBSpeed")]
     pub speed: Option<String>,
 }
@@ -198,6 +200,7 @@ impl UsbDevice {
             deviceProtocol: device_info.protocol(),
             bus: device_info.bus_id().to_string(),
             address: device_info.device_address(),
+            ports: device_info.port_chain().to_vec(),
             speed: match device_info.speed() {
                 Some(speed) => match speed {
                     nusb::Speed::Low => Some("low".to_string()),
