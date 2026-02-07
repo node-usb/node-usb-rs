@@ -17,6 +17,11 @@ interface WebUSBDevice extends USBDevice {
     address: number;
 
     /**
+     * The USB port numbers the device is connected through (e.g. `[1]`, `[3, 4]`, etc.)
+     */
+    ports: Array<number>
+
+    /**
      * The USB speed of the device (e.g. `Low`, `Full`, `High`, `Super`, `SuperPlus` or `undefined` if unknown)
      */
     speed?: USBSpeed;
