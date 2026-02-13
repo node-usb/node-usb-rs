@@ -500,12 +500,12 @@ impl UsbDevice {
     }
 
     #[napi(js_name = "nativeIsochronousTransferIn", ts_return_type = "Promise<USBIsochronousInTransferResult>")]
-    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>) -> Result<()> {
+    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>, _timeout: u32) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
     }
 
     #[napi(js_name = "nativeIsochronousTransferOut", ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
-    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>) -> Result<()> {
+    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>, _timeout: u32) -> Result<()> {
         Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
     }
 

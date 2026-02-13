@@ -68,15 +68,17 @@ UsbDevice.prototype.transferOut = async function (endpointNumber: number, data: 
 /**
  * Hidden
  */
-UsbDevice.prototype.isochronousTransferIn = async function (_endpointNumber: number, _packetLengths: number[]): Promise<USBIsochronousInTransferResult> {
-    throw new Error('isochronousTransferIn error: method not implemented');
+UsbDevice.prototype.isochronousTransferIn = async function (endpointNumber: number, packetLengths: number[], timeout = DEFAULT_TIMEOUT): Promise<USBIsochronousInTransferResult> {
+    const res = await this.nativeIsochronousTransferIn(endpointNumber, packetLengths, timeout);
+    return res;
 }
 
 /**
  * Hidden
  */
-UsbDevice.prototype.isochronousTransferOut = async function (_endpointNumber: number, _data: BufferSource, _packetLengths: number[]): Promise<USBIsochronousOutTransferResult> {
-    throw new Error('isochronousTransferOut error: method not implemented');
+UsbDevice.prototype.isochronousTransferOut = async function (endpointNumber: number, data: BufferSource, packetLengths: number[], timeout = DEFAULT_TIMEOUT): Promise<USBIsochronousOutTransferResult> {
+    const res = await this.nativeIsochronousTransferOut(endpointNumber, toUint8Array(data), packetLengths, timeout);
+    return res;
 }
 
 /**
