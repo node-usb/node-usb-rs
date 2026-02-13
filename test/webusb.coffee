@@ -92,6 +92,12 @@ describe 'Device properties', ->
         assert.equal(device.configuration.interfaces[0].alternates.length, 1)
         assert.equal(device.configuration.interfaces[0].alternates[0].alternateSetting, 0)
 
+    it 'should have extended properties', ->
+        assert.equal(typeof device.bus, 'string')
+        assert.equal(typeof device.address, 'number')
+        assert.equal(typeof device.speed, 'string')
+        assert.ok(Array.isArray(device.ports))
+
 describe 'String descriptors', ->
     device = null
     before ->
@@ -153,6 +159,13 @@ describe 'Interfaces', ->
 
     it 'fails to release missing interface', ->
         assert.rejects(device.releaseInterface(99))
+
+    if process.platform == 'linux'
+        it "should fail to detach the kernel driver", ->
+            assert.throws -> device.detachKernelDriver(0)
+
+        it "should fail to attach the kernel driver", ->
+            assert.throws -> device.attachKernelDriver(0)
 
     after ->
         device.close()
