@@ -3,10 +3,9 @@
 mod webusb_device;
 
 use futures_lite::StreamExt;
-use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunction, threadsafe_function::ThreadsafeFunctionCallMode};
 use napi_derive::napi;
-use nusb::hotplug::HotplugEvent;
+use nusb::{hotplug::HotplugEvent, MaybeFuture};
 use webusb_device::UsbDevice;
 
 #[napi]
@@ -69,18 +68,20 @@ impl Emitter {
 
 #[napi(js_name = "nativeGetDevices")]
 pub async fn getDevices() -> Result<Vec<UsbDevice>> {
-    let devices = nusb::list_devices().await.map_err(|e| napi::Error::from_reason(format!("getDevices error: {e}")))?;
+    let devices = nusb::list_devices().wait().map_err(|e| napi::Error::from_reason(format!("getDevices error: {e}")))?;
     Ok(devices.map(UsbDevice::new).collect())
 }
 
 #[napi(js_name = "nativeFindDeviceByIds")]
 pub async fn findDeviceByIds(vendorId: u16, productId: u16) -> Result<Option<UsbDevice>> {
-    let mut devices = nusb::list_devices().await.map_err(|e| napi::Error::from_reason(format!("findDeviceByIds error: {e}")))?;
+    let mut devices = nusb::list_devices().wait().map_err(|e| napi::Error::from_reason(format!("findDeviceByIds error: {e}")))?;
     Ok(devices.find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId).map(UsbDevice::new))
 }
 
 #[napi(js_name = "nativeFindDeviceBySerial")]
 pub async fn findDeviceBySerial(serialNumber: String) -> Result<Option<UsbDevice>> {
-    let mut devices = nusb::list_devices().await.map_err(|e| napi::Error::from_reason(format!("findDeviceBySerial error: {e}")))?;
+    let mut devices = nusb::list_devices()
+        .wait()
+        .map_err(|e| napi::Error::from_reason(format!("findDeviceBySerial error: {e}")))?;
     Ok(devices.find(|dev| dev.serial_number() == Some(serialNumber.as_str())).map(UsbDevice::new))
 }
