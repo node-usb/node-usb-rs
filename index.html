@@ -10,7 +10,8 @@
 <p><a href="https://nodejs.org">Node.js &gt;= v12.22.0</a>, which includes <code>npm</code>.</p>
 <h2 id="windows" class="tsd-anchor-link">Windows<a href="#windows" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <p>On Windows, if you get a <code>NOT_SUPPORTED</code> error when attempting to open your device, it's possible your device doesn't have a WinUSB driver to use.</p>
-<p>You can install one using <a href="http://zadig.akeo.ie/">Zadig</a>.</p>
+<p>If you are a device vendor, consider implementing <a href="https://github.com/pbatard/libwdi/wiki/WCID-Devices">WCID</a> to get WinUSB driver support automatically.
+Otherwise, you can install a WinUSB driver using <a href="http://zadig.akeo.ie/">Zadig</a>.</p>
 <h2 id="linux" class="tsd-anchor-link">Linux<a href="#linux" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
 <p>You may need to modify your udev and permission rules in order to access your desired device. Along the lines of:</p>
 <pre><code class="code">SUBSYSTEM=="usb", ATTR{idVendor}=="USB-VENDOR-ID", ATTR{idProduct}=="USB-PRODUCT-ID", MODE="0660", GROUP="GROUP-YOUR-USER-IS-IN"
