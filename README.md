@@ -19,7 +19,8 @@ This is a complete rewrite in rust using [@kevinmehall](https://github.com/kevin
 
 On Windows, if you get a `NOT_SUPPORTED` error when attempting to open your device, it's possible your device doesn't have a WinUSB driver to use.
 
-You can install one using [Zadig](http://zadig.akeo.ie/).
+If you are a device vendor, consider implementing [WCID](https://github.com/pbatard/libwdi/wiki/WCID-Devices) to get WinUSB driver support automatically.
+Otherwise, you can install a WinUSB driver using [Zadig](http://zadig.akeo.ie/).
 
 ## Linux
 
