@@ -8,6 +8,9 @@ Node.JS library for communicating with USB devices.
 
 This is a complete rewrite in rust using [@kevinmehall](https://github.com/kevinmehall)'s excellent [nusb library](https://docs.rs/nusb/latest/nusb) and [napi-rs](https://napi.rs/).
 
+# License
+[MIT](LICENSE.md)
+
 # Prerequisites
 
 [Node.js >= v12.22.0](https://nodejs.org), which includes `npm`.
@@ -26,7 +29,22 @@ You may need to modify your udev and permission rules in order to access your de
 SUBSYSTEM=="usb", ATTR{idVendor}=="USB-VENDOR-ID", ATTR{idProduct}=="USB-PRODUCT-ID", MODE="0660", GROUP="GROUP-YOUR-USER-IS-IN"
 ```
 
-# Installation
+# Getting Started
+
+## Supported Architectures and Operating Systems
+
+- i686-pc-windows-msvc
+- x86_64-apple-darwin
+- x86_64-pc-windows-msvc
+- x86_64-unknown-linux-gnu
+- x86_64-unknown-linux-musl
+- aarch64-apple-darwin
+- aarch64-pc-windows-msvc
+- aarch64-unknown-linux-gnu
+- aarch64-unknown-linux-musl
+- armv7-unknown-linux-gnueabihf
+
+## Installation
 
 Native modules are bundled as separate optional packages, so installation should be as simple as installing the package.
 
@@ -42,27 +60,85 @@ With `yarn`:
 yarn add usb
 ```
 
-# License
-[MIT](LICENSE.md)
-
-# Limitations
-Does not support:
-
-- Isochronous transfers
-
-# Getting Started
+## Examples
 Use the following examples to kickstart your development. Once you have a desired device, use the APIs below to interact with it.
 
-## APIs
-Since `v3.0.0`, the `node-usb` library supports the WebUSB API which follows the [WebUSB Specification](https://wicg.github.io/webusb/)
+### List all devices
+```typescript
+import { usb } from 'usb';
 
-Convenience methods also exist to easily list or find devices.
+const devices = await usb.getDevices();
 
-Full auto-generated API documentation can be seen here:
+for (const device of devices) {
+    console.log(device); // WebUSB device
+}
+```
 
-https://node-usb.github.io/node-usb-rs/
+### Find device by vid/pid
+```typescript
+import { usb } from 'usb';
 
-## Electron
+const device = await usb.findDeviceByIds(0x59e3, 0x0a23);
+
+if (device) {
+    console.log(device); // WebUSB device
+}
+```
+
+### Find device by SerialNumber
+```typescript
+import { usb } from 'usb';
+
+const device = await usb.findDeviceBySerial('TEST_DEVICE');
+
+if (device) {
+    console.log(device); // WebUSB device
+}
+```
+
+### Watch for connect/disconnect events
+```typescript
+import { usb } from 'usb';
+
+usb.addEventListener('connect', (event) => {
+    console.log('Device connected:', event.device.serialNumber);
+});
+
+usb.addEventListener('disconnect', (event) => {
+    console.log('Device disconnected:', event.device.serialNumber);
+});
+```
+
+### Use WebUSB approach to find a device
+```typescript
+import { webusb } from 'usb';
+
+// Returns first matching device
+const device = await webusb.requestDevice({
+    filters: [{}]
+})
+
+console.log(device); // WebUSB device
+```
+
+### Use WebUSB approach to find a device with custom selection method
+```typescript
+import { WebUSB } from 'usb';
+
+const customWebUSB = new WebUSB({
+    // This function can return a promise which allows a UI to be displayed if required
+    devicesFound: devices => devices.find(device => device.serialNumber === 'TEST_DEVICE')
+});
+
+// Returns device based on injected 'devicesFound' function
+const device = await customWebUSB.requestDevice({
+    filters: [{}]
+})
+
+console.log(device); // WebUSB device
+```
+
+### Electron
 Please refer to the maintained example for using `node-usb` in electron:
 
 https://github.com/node-usb/node-usb-example-electron
@@ -73,46 +149,39 @@ If using a packaging system for electron, ensure the `node-usb` library does not
 - nodeGypRebuild: false
 - npmRebuild: false
 
-## Convenience Functions
-
-### getDeviceList()
-Return a list of `USB` objects for the USB devices attached to the system.
-
-### findByIds(vid, pid)
-Convenience method to get the first device with the specified VID and PID, or `undefined` if no such device is present.
-
-### findBySerialNumber(serialNumber)
-Convenience method to get the device with the specified serial number, or `undefined` if no such device is present.
-
-## WebUSB
-
-Please refer to the WebUSB specification which be found here:
+# APIs
+Since `v3.0.0`, the `node-usb` API follows the WebUSB specification which can be found here:
 
 https://wicg.github.io/webusb/
 
-### Implementation Status
+Two versions of the WebUSB API exist by default:
 
-#### Architectures and Operating Systems
+- `usb` - which exposes all functionality in an unrestricted manner (e.g. without needing to `requestDevice()` first)
+- `webusb` - which follows the WebUSB specification exactly and requires the user to authorise devices via `requestDevice()` first.
 
-- i686-pc-windows-msvc
-- x86_64-apple-darwin
-- x86_64-pc-windows-msvc
-- x86_64-unknown-linux-gnu
-- x86_64-unknown-linux-musl
-- aarch64-apple-darwin
-- aarch64-pc-windows-msvc
-- aarch64-unknown-linux-gnu
-- aarch64-unknown-linux-musl
-- armv7-unknown-linux-gnueabihf
+You may also construct your own WebUSB (e.g. to specify a `requestDevice()` callback) using the exported `WebUSB` class.
 
-#### USB
+Full auto-generated API documentation can be seen here:
+
+https://node-usb.github.io/node-usb-rs/
+
+## Implementation Status
+
+### USB
+
+#### WebUSB Features
 
 - [x] getDevices()
 - [x] requestDevice()
 
-#### USBDevice
+#### Extended Features
 
-##### WebUSB Features
+- [x] findDeviceByIds()
+- [x] findDeviceBySerial()
+
+### USBDevice
+
+#### WebUSB Features
 
 - [x] usbVersionMajor
 - [x] usbVersionMinor
@@ -147,7 +216,7 @@ https://wicg.github.io/webusb/
 - [ ] isochronousTransferIn()
 - [ ] isochronousTransferOut()
 
-##### Extended Features
+#### Extended Features
 
 - [x] bus
 - [x] address
@@ -156,10 +225,27 @@ https://wicg.github.io/webusb/
 - [x] detachKernelDriver() (Linux only)
 - [x] attachKernelDriver() (Linux only)
 
-#### Events
+### Events
 
 - [x] connect
 - [x] disconnect
+
+## Extended Functions
+
+This library extends the WebUSB specification to add further functionality and convenience
+
+### findDeviceByIds(vid, pid)
+Convenience method to get the first device with the specified VID and PID, or `undefined` if no such device is present.
+
+### findDeviceBySerial(serialNumber)
+Convenience method to get the device with the specified serial number, or `undefined` if no such device is present.
+
+### detachKernelDriver(interfaceNumber) (Linux only)
+Detaches the kernel driver from the interface.
+You may need to execute this with elevated privileges.
+
+### attachKernelDriver(interfaceNumber) (Linux only)
+Re-attaches the kernel driver for the interface.
 
 # Development
 The library is based on native rust bindings wrapping the [nusb](https://docs.rs/nusb/latest/nusb) crate.

@@ -1,4 +1,4 @@
-import { nativeGetDeviceList, nativeFindByIds, nativeFindBySerialNumber, UsbDevice, Emitter } from '../index.js'
+import { nativeGetDevices, nativeFindDeviceByIds, nativeFindDeviceBySerial, UsbDevice, Emitter } from '../index.js'
 
 /**
  * Hidden
@@ -187,7 +187,7 @@ class WebUSB extends EventTarget implements USB {
         this.nativeEmitter.start();
         this.nativeEmitter.addAttach(deviceConnectCallback);
         this.nativeEmitter.addDetach(deviceDisconnectCallback);
-        getDeviceList().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
+        nativeGetDevices().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
     }
 
     private _onconnect: ((ev: USBConnectionEvent) => void) | undefined;
@@ -298,8 +298,27 @@ class WebUSB extends EventTarget implements USB {
         return devices.filter(device => this.isAuthorisedDevice(device));
     }
 
+    /**
+     * Convenience method to get the first device with the specified VID and PID, or `undefined` if no such device is present.
+     * @param vid
+     * @param pid
+     */
+    public async findDeviceByIds(vid: number, pid: number): Promise<UsbDevice | undefined> {
+        const device = await nativeFindDeviceByIds(vid, pid);
+        return device || undefined;
+    }
+
+    /**
+     * Convenience method to get the device with the specified serial number, or `undefined` if no such device is present.
+     * @param serialNumber
+     */
+    public async findDeviceBySerial(serialNumber: string): Promise<UsbDevice | undefined> {
+        const device = await nativeFindDeviceBySerial(serialNumber);
+        return device || undefined;
+    }
+
     private async loadDevices(preFilters?: USBDeviceFilter[]): Promise<UsbDevice[]> {
-        let devices = await getDeviceList();
+        let devices = await nativeGetDevices();
 
         // Pre-filter devices
         devices = this.quickFilter(devices, preFilters);
@@ -406,31 +425,11 @@ class WebUSB extends EventTarget implements USB {
 }
 
 /**
- * Convenience method to get an array of all connected devices.
+ * Default USB object (allows all devices by default)
  */
-const getDeviceList = async (): Promise<UsbDevice[]> => {
-    const devices = await nativeGetDeviceList();
-    return devices;
-};
-
-/**
- * Convenience method to get the first device with the specified VID and PID, or `undefined` if no such device is present.
- * @param vid
- * @param pid
- */
-const findByIds = async (vid: number, pid: number): Promise<UsbDevice | undefined> => {
-    const device = await nativeFindByIds(vid, pid);
-    return device;
-};
-
-/**
- * Convenience method to get the device with the specified serial number, or `undefined` if no such device is present.
- * @param serialNumber
- */
-const findBySerialNumber = async (serialNumber: string): Promise<UsbDevice | undefined> => {
-    const device = await nativeFindBySerialNumber(serialNumber);
-    return device;
-};
+const usb = new WebUSB({
+    allowAllDevices: true
+});
 
 /**
  * Default WebUSB object (mimics navigator.usb)
@@ -438,6 +437,9 @@ const findBySerialNumber = async (serialNumber: string): Promise<UsbDevice | und
 const webusb = typeof navigator !== 'undefined' && navigator.usb ? navigator.usb : new WebUSB();
 
 export {
+    // Default USB object (allows all devices by default)
+    usb,
+
     // Default WebUSB object (mimics navigator.usb)
     webusb,
 
@@ -446,9 +448,4 @@ export {
 
     // Types
     USBOptions,
-
-    // Convenience methods
-    getDeviceList,
-    findByIds,
-    findBySerialNumber,
 };

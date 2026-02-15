@@ -1,26 +1,24 @@
 assert = require('assert')
 util = require('util')
+usb = require('../dist').usb
 webusb = require('../dist').webusb
 WebUSB = require('../dist').WebUSB
-getDeviceList = require('../dist').getDeviceList
-findByIds = require('../dist').findByIds
-findBySerialNumber = require('../dist').findBySerialNumber
 
 if typeof gc is 'function'
     # running with --expose-gc, do a sweep between tests so valgrind blames the right one
     afterEach -> gc()
 
-describe 'helpers', ->
-    it 'should getDeviceList', ->
-        devs = await getDeviceList()
+describe 'usb Module', ->
+    it 'should getDevices', ->
+        devs = await usb.getDevices()
         assert.ok(devs.length > 0, "Demo device is not attached")
 
-    it 'should findByIds', ->
-        dev = await findByIds(0x59e3, 0x0a23)
+    it 'should findDeviceByIds', ->
+        dev = await usb.findDeviceByIds(0x59e3, 0x0a23)
         assert.ok(dev, "Demo device is not attached")
 
-    it 'should findBySerialNumber', ->
-        dev = await findBySerialNumber('TEST_DEVICE')
+    it 'should findDeviceBySerial', ->
+        dev = await usb.findDeviceBySerial('TEST_DEVICE')
         assert.ok(dev, "Demo device is not attached")
 
 describe 'WebUSB Module', ->
