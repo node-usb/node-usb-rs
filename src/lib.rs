@@ -6,63 +6,106 @@ use futures_lite::StreamExt;
 use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunction, threadsafe_function::ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
+use std::sync::Arc;
+use tokio::sync::{watch, RwLock};
 use webusb_device::UsbDevice;
+
+struct Callbacks {
+    attach: Option<ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>>,
+    detach: Option<ThreadsafeFunction<String, (), String, napi::Status, false>>,
+}
 
 #[napi]
 pub struct Emitter {
-    attachCallback: Option<ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>>,
-    detachCallback: Option<ThreadsafeFunction<String, (), String, napi::Status, false>>,
+    callbacks: Arc<RwLock<Callbacks>>,
+    listeners_tx: watch::Sender<bool>,
 }
 
 #[napi]
 impl Emitter {
     #[napi(constructor)]
     pub fn new() -> Self {
+        let callbacks = Arc::new(RwLock::new(Callbacks { attach: None, detach: None }));
+        let (listeners_tx, _listeners_rx) = watch::channel(false);
         Self {
-            attachCallback: None,
-            detachCallback: None,
+            callbacks,
+            listeners_tx,
         }
     }
 
     #[napi]
-    pub async unsafe fn start(&self) {
-        let mut watch = nusb::watch_devices().unwrap();
-        while let Some(event) = watch.next().await {
-            match event {
-                HotplugEvent::Connected(info) => {
-                    if let Some(callback) = &self.attachCallback {
-                        let device = UsbDevice::new(info);
-                        callback.call(device, ThreadsafeFunctionCallMode::NonBlocking);
-                    }
+    pub async fn init(&self) {
+        let callbacks = self.callbacks.clone();
+        let mut listeners_rx = self.listeners_tx.subscribe();
+
+        tokio::spawn(async move {
+            loop {
+                while !*listeners_rx.borrow() {
+                    // Wait for an event to be attached
                 }
-                HotplugEvent::Disconnected(id) => {
-                    if let Some(callback) = &self.detachCallback {
-                        let handle = format!("{:?}", id);
-                        callback.call(handle, ThreadsafeFunctionCallMode::NonBlocking);
+
+                let mut watch_stream = nusb::watch_devices().unwrap();
+                loop {
+                    tokio::select! {
+                        _ = listeners_rx.changed() => {
+                            if !*listeners_rx.borrow() {
+                                // No listeners attached, stop watching for device events
+                                break;
+                            }
+                        }
+                        ev = watch_stream.next() => {
+                            match ev {
+                                Some(HotplugEvent::Connected(info)) => {
+                                    let guard = callbacks.read().await;
+                                    if let Some(cb) = guard.attach.as_ref() {
+                                        cb.call(UsbDevice::new(info), ThreadsafeFunctionCallMode::NonBlocking);
+                                    }
+                                }
+                                Some(HotplugEvent::Disconnected(id)) => {
+                                    let guard = callbacks.read().await;
+                                    if let Some(cb) = guard.detach.as_ref() {
+                                        cb.call(format!("{:?}", id), ThreadsafeFunctionCallMode::NonBlocking);
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
                     }
                 }
             }
-        }
+        });
     }
 
     #[napi]
-    pub fn addAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
-        self.attachCallback = Some(callback);
+    pub async unsafe fn addAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
+        { self.callbacks.write().await.attach = Some(callback); }
+        self.publishState().await;
     }
 
     #[napi]
-    pub fn removeAttach(&mut self, _callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
-        self.attachCallback = None;
+    pub async unsafe fn removeAttach(&mut self) {
+        { self.callbacks.write().await.attach = None; }
+        self.publishState().await;
     }
 
     #[napi]
-    pub fn addDetach(&mut self, callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
-        self.detachCallback = Some(callback);
+    pub async unsafe fn addDetach(&mut self, callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
+        { self.callbacks.write().await.detach = Some(callback); }
+        self.publishState().await;
     }
 
     #[napi]
-    pub fn removeDetach(&mut self, _callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
-        self.detachCallback = None;
+    pub async unsafe fn removeDetach(&mut self) {
+        { self.callbacks.write().await.detach = None; }
+        self.publishState().await;
+    }
+
+    async fn publishState(&self) {
+        let listeners = {
+            let cb = self.callbacks.read().await;
+            cb.attach.is_some() || cb.detach.is_some()
+        };
+        let _ = self.listeners_tx.send(listeners);
     }
 }
 
