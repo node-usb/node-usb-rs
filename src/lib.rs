@@ -40,8 +40,9 @@ impl Emitter {
 
         tokio::spawn(async move {
             loop {
-                while !*listeners_rx.borrow() {
-                    // Wait for an event to be attached
+                // Async-wait until at least one listener is attached
+                if listeners_rx.wait_for(|v| *v).await.is_err() {
+                    return;
                 }
 
                 let mut watch_stream = nusb::watch_devices().unwrap();
