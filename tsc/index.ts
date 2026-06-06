@@ -137,6 +137,7 @@ class WebUSB extends EventTarget implements USB {
     protected nativeEmitter = new Emitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
     protected listenerCount = 0;
+    protected eventListeners = new Map<string, Set<EventListener>>();
     protected knownDevices: Map<string, UsbDevice> = new Map();
 
     constructor(private options: USBOptions = {}) {
@@ -171,10 +172,18 @@ class WebUSB extends EventTarget implements USB {
             return;
         }
 
-        super.addEventListener(type, listener as any);
-        this.listenerCount++;
+        const existingListeners = this.eventListeners.get(type) || new Set<EventListener>();
+        const hadListeners = this.listenerCount > 0;
 
-        if (this.listenerCount === 1) {
+        super.addEventListener(type, listener as any);
+
+        if (!existingListeners.has(listener as EventListener)) {
+            existingListeners.add(listener as EventListener);
+            this.eventListeners.set(type, existingListeners);
+            this.listenerCount++;
+        }
+
+        if (!hadListeners && this.listenerCount > 0) {
             this.nativeEmitter.addAttach(this.deviceConnectCallback);
             this.nativeEmitter.addDetach(this.deviceDisconnectCallback);
             nativeGetDevices().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
@@ -187,11 +196,20 @@ class WebUSB extends EventTarget implements USB {
         if (type !== 'connect' && type !== 'disconnect') {
             return;
         }
-        
-        super.removeEventListener(type, callback as any);
-        this.listenerCount--;
+        const existingListeners = this.eventListeners.get(type);
+        const removed = existingListeners ? existingListeners.delete(callback as EventListener) : false;
 
-        if (this.listenerCount === 0) {
+        super.removeEventListener(type, callback as any);
+
+        if (removed) {
+            this.listenerCount--;
+
+            if (existingListeners && existingListeners.size === 0) {
+                this.eventListeners.delete(type);
+            }
+        }
+
+        if (removed && this.listenerCount === 0) {
             this.nativeEmitter.removeAttach();
             this.nativeEmitter.removeDetach();
             this.knownDevices.clear();
@@ -270,27 +288,23 @@ class WebUSB extends EventTarget implements USB {
             throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
         }
 
-        try {
-            // If no devicesFound function, select the first device found
-            const device = this.options.devicesFound ? await this.options.devicesFound(devices) : devices[0];
+        // If no devicesFound function, select the first device found
+        const device = this.options.devicesFound ? await this.options.devicesFound(devices) : devices[0];
 
-            if (!device) {
-                throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
-            }
-
-            this.authorisedDevices.add({
-                vendorId: device.vendorId,
-                productId: device.productId,
-                classCode: device.deviceClass,
-                subclassCode: device.deviceSubclass,
-                protocolCode: device.deviceProtocol,
-                serialNumber: device.serialNumber || undefined
-            });
-
-            return device;
-        } catch (error) {
+        if (!device) {
             throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
         }
+
+        this.authorisedDevices.add({
+            vendorId: device.vendorId,
+            productId: device.productId,
+            classCode: device.deviceClass,
+            subclassCode: device.deviceSubclass,
+            protocolCode: device.deviceProtocol,
+            serialNumber: device.serialNumber || undefined
+        });
+
+        return device;
     }
 
     /**

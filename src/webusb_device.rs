@@ -13,10 +13,14 @@ fn decode_version(version: u16) -> (u8, u8, u8) {
     (major, minor, sub)
 }
 
-fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Option<String> {
+fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Result<Option<String>> {
     match index {
-        Some(desc_index) => Some(device.get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT).wait().unwrap()),
-        None => None,
+        Some(desc_index) => device
+            .get_string_descriptor(desc_index, US_ENGLISH, DESC_TIMEOUT)
+            .wait()
+            .map(Some)
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}"))),
+        None => Ok(None),
     }
 }
 
@@ -69,15 +73,15 @@ pub struct UsbAlternateInterface {
 }
 
 impl UsbAlternateInterface {
-    pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Self {
-        Self {
+    pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Result<Self> {
+        Ok(Self {
             alternateSetting: iface.alternate_setting(),
             interfaceClass: iface.class(),
             interfaceSubclass: iface.subclass(),
             interfaceProtocol: iface.protocol(),
-            interfaceName: get_string(device, iface.string_index()),
+            interfaceName: get_string(device, iface.string_index())?,
             endpoints: iface.endpoints().map(|endpoint| UsbEndpoint::new(endpoint)).collect(),
-        }
+        })
     }
 }
 
@@ -94,13 +98,13 @@ pub struct UsbInterface {
 }
 
 impl UsbInterface {
-    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptors) -> Self {
-        Self {
+    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptors) -> Result<Self> {
+        Ok(Self {
             interfaceNumber: iface.interface_number(),
             claimed: usb_device.interfaces[iface.interface_number() as usize].is_some(),
-            alternate: UsbAlternateInterface::new(&device, iface.first_alt_setting()),
-            alternates: iface.alt_settings().map(|iface| UsbAlternateInterface::new(&device, iface)).collect(),
-        }
+            alternate: UsbAlternateInterface::new(&device, iface.first_alt_setting())?,
+            alternates: iface.alt_settings().map(|iface| UsbAlternateInterface::new(&device, iface)).collect::<Result<Vec<_>>>()?,
+        })
     }
 }
 
@@ -115,14 +119,14 @@ pub struct UsbConfiguration {
 }
 
 impl UsbConfiguration {
-    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Self {
-        let interfaces = config.interfaces().map(|iface| UsbInterface::new(&usb_device, &device, iface)).collect();
+    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Result<Self> {
+        let interfaces = config.interfaces().map(|iface| UsbInterface::new(&usb_device, &device, iface)).collect::<Result<Vec<_>>>()?;
 
-        Self {
+        Ok(Self {
             configurationValue: config.configuration_value(),
-            configurationName: get_string(device, config.string_index()),
+            configurationName: get_string(device, config.string_index())?,
             interfaces,
-        }
+        })
     }
 }
 
@@ -221,13 +225,13 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn manufacturerName(&mut self) -> Option<String> {
+    pub unsafe fn manufacturerName(&mut self) -> Result<Option<String>> {
         match &self.device_info.manufacturer_string() {
-            Some(str) => Some(str.to_string()),
+            Some(str) => Ok(Some(str.to_string())),
             None => {
                 let device = match self.device.as_ref() {
                     Some(device) => device.clone(),
-                    None => self._open().unwrap(),
+                    None => self._open()?,
                 };
 
                 get_string(&device, device.device_descriptor().manufacturer_string_index())
@@ -236,13 +240,13 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn productName(&mut self) -> Option<String> {
+    pub unsafe fn productName(&mut self) -> Result<Option<String>> {
         match &self.device_info.product_string() {
-            Some(str) => Some(str.to_string()),
+            Some(str) => Ok(Some(str.to_string())),
             None => {
                 let device = match self.device.as_ref() {
                     Some(device) => device.clone(),
-                    None => self._open().unwrap(),
+                    None => self._open()?,
                 };
 
                 get_string(&device, device.device_descriptor().product_string_index())
@@ -251,13 +255,13 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn serialNumber(&mut self) -> Option<String> {
+    pub unsafe fn serialNumber(&mut self) -> Result<Option<String>> {
         match &self.device_info.serial_number() {
-            Some(str) => Some(str.to_string()),
+            Some(str) => Ok(Some(str.to_string())),
             None => {
                 let device = match self.device.as_ref() {
                     Some(device) => device.clone(),
-                    None => self._open().unwrap(),
+                    None => self._open()?,
                 };
 
                 get_string(&device, device.device_descriptor().serial_number_string_index())
@@ -271,23 +275,27 @@ impl UsbDevice {
     }
 
     #[napi(getter, ts_return_type = "USBConfiguration")]
-    pub unsafe fn configuration(&mut self) -> Option<UsbConfiguration> {
+    pub unsafe fn configuration(&mut self) -> Result<Option<UsbConfiguration>> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
-            None => self._open().unwrap(),
+            None => self._open()?,
         };
 
-        Some(UsbConfiguration::new(&self, &device, device.active_configuration().unwrap()))
+        let config = device
+            .active_configuration()
+            .map_err(|e| napi::Error::from_reason(format!("configuration error: {e}")))?;
+
+        Ok(Some(UsbConfiguration::new(&self, &device, config)?))
     }
 
     #[napi(getter, ts_return_type = "Array<USBConfiguration>")]
-    pub unsafe fn configurations(&mut self) -> Vec<UsbConfiguration> {
+    pub unsafe fn configurations(&mut self) -> Result<Vec<UsbConfiguration>> {
         let device = match self.device.as_ref() {
             Some(device) => device.clone(),
-            None => self._open().unwrap(),
+            None => self._open()?,
         };
 
-        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect()
+        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect::<Result<Vec<_>>>()
     }
 
     unsafe fn _open(&mut self) -> Result<nusb::Device> {
@@ -296,8 +304,8 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn open(&mut self) -> Result<()> {
-        let device = self._open();
-        self.device = device.ok();
+        let device = self._open()?;
+        self.device = Some(device);
         Ok(())
     }
 
@@ -557,8 +565,8 @@ impl UsbDevice {
     fn get_interface(&self, recipient: nusb::transfer::Recipient, index: u16) -> Option<nusb::Interface> {
         if recipient == nusb::transfer::Recipient::Interface {
             // If recipient is interface and index matches a claimed interface number use that interface
-            if self.interfaces[index as usize].is_some() {
-                return self.interfaces[index as usize].clone();
+            if let Some(interface) = self.interfaces.get(index as usize).and_then(|interface| interface.clone()) {
+                return Some(interface);
             }
         }
         if recipient == nusb::transfer::Recipient::Endpoint {
@@ -569,7 +577,11 @@ impl UsbDevice {
                     None => continue,
                 };
 
-                for endpoint in iface.descriptor().unwrap().endpoints() {
+                let Some(descriptor) = iface.descriptor() else {
+                    continue;
+                };
+
+                for endpoint in descriptor.endpoints() {
                     if endpoint.address() == index as u8 {
                         return Some(iface.clone());
                     }
@@ -592,7 +604,11 @@ impl UsbDevice {
                 None => continue,
             };
 
-            for endpoint in iface.descriptor().unwrap().endpoints() {
+            let Some(descriptor) = iface.descriptor() else {
+                continue;
+            };
+
+            for endpoint in descriptor.endpoints() {
                 if endpoint.direction() == DIR::DIR && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber {
                     return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
                 }

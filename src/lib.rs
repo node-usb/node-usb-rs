@@ -6,6 +6,7 @@ use futures_lite::StreamExt;
 use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunction, threadsafe_function::ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{watch, RwLock};
 use webusb_device::UsbDevice;
@@ -19,6 +20,7 @@ struct Callbacks {
 pub struct Emitter {
     callbacks: Arc<RwLock<Callbacks>>,
     listeners_tx: watch::Sender<bool>,
+    initialized: AtomicBool,
 }
 
 #[napi]
@@ -30,11 +32,16 @@ impl Emitter {
         Self {
             callbacks,
             listeners_tx,
+            initialized: AtomicBool::new(false),
         }
     }
 
     #[napi]
-    pub async fn init(&self) {
+    pub async fn init(&self) -> Result<()> {
+        if self.initialized.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+
         let callbacks = self.callbacks.clone();
         let mut listeners_rx = self.listeners_tx.subscribe();
 
@@ -45,7 +52,10 @@ impl Emitter {
                     return;
                 }
 
-                let mut watch_stream = nusb::watch_devices().unwrap();
+                let mut watch_stream = match nusb::watch_devices() {
+                    Ok(watch_stream) => watch_stream,
+                    Err(_) => return,
+                };
                 loop {
                     tokio::select! {
                         _ = listeners_rx.changed() => {
@@ -75,6 +85,8 @@ impl Emitter {
                 }
             }
         });
+
+        Ok(())
     }
 
     #[napi]
