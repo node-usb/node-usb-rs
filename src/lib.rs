@@ -12,7 +12,7 @@ use nusb::{hotplug::HotplugEvent, MaybeFuture};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{watch, RwLock};
-use webusb_device::UsbDevice;
+use webusb_device::{run_blocking, UsbDevice};
 
 struct Callbacks {
     attach: Option<ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>>,
@@ -142,30 +142,36 @@ impl Emitter {
     }
 }
 
+async fn list_devices(error_prefix: &'static str) -> Result<Vec<nusb::DeviceInfo>> {
+    run_blocking(move || {
+        nusb::list_devices()
+            .wait()
+            .map(|devices| devices.collect::<Vec<_>>())
+            .map_err(|e| format!("{error_prefix} error: {e}"))
+    })
+    .await
+}
+
 #[napi(js_name = "nativeGetDevices")]
 pub async fn getDevices() -> Result<Vec<UsbDevice>> {
-    let devices = nusb::list_devices()
-        .wait()
-        .map_err(|e| napi::Error::from_reason(format!("getDevices error: {e}")))?;
-    Ok(devices.map(UsbDevice::new).collect())
+    let devices = list_devices("getDevices").await?;
+    Ok(devices.into_iter().map(UsbDevice::new).collect())
 }
 
 #[napi(js_name = "nativeFindDeviceByIds")]
 pub async fn findDeviceByIds(vendorId: u16, productId: u16) -> Result<Option<UsbDevice>> {
-    let mut devices = nusb::list_devices()
-        .wait()
-        .map_err(|e| napi::Error::from_reason(format!("findDeviceByIds error: {e}")))?;
-    Ok(devices
-        .find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId)
-        .map(UsbDevice::new))
+    let device = list_devices("findDeviceByIds")
+        .await?
+        .into_iter()
+        .find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId);
+    Ok(device.map(UsbDevice::new))
 }
 
 #[napi(js_name = "nativeFindDeviceBySerial")]
 pub async fn findDeviceBySerial(serialNumber: String) -> Result<Option<UsbDevice>> {
-    let mut devices = nusb::list_devices()
-        .wait()
-        .map_err(|e| napi::Error::from_reason(format!("findDeviceBySerial error: {e}")))?;
-    Ok(devices
-        .find(|dev| dev.serial_number() == Some(serialNumber.as_str()))
-        .map(UsbDevice::new))
+    let device = list_devices("findDeviceBySerial")
+        .await?
+        .into_iter()
+        .find(|dev| dev.serial_number() == Some(serialNumber.as_str()));
+    Ok(device.map(UsbDevice::new))
 }

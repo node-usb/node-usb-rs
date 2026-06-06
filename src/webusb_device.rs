@@ -24,6 +24,17 @@ fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Resu
     }
 }
 
+pub(crate) async fn run_blocking<T, F>(f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> std::result::Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| napi::Error::from_reason(format!("blocking task error: {e}")))?
+        .map_err(napi::Error::from_reason)
+}
+
 #[napi(object)]
 pub struct UsbEndpoint {
     #[napi(writable = false)]
@@ -338,7 +349,14 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn open(&mut self) -> Result<()> {
-        let device = self._open()?;
+        let device_info = self.device_info.clone();
+        let device = run_blocking(move || {
+            device_info
+                .open()
+                .wait()
+                .map_err(|e| format!("open error: {e}"))
+        })
+        .await?;
         self.device = Some(device);
         Ok(())
     }
@@ -357,10 +375,16 @@ impl UsbDevice {
     #[napi]
     pub async fn reset(&self) -> Result<()> {
         match &self.device {
-            Some(device) => device
-                .reset()
-                .wait()
-                .map_err(|e| napi::Error::from_reason(format!("reset error: {e}"))),
+            Some(device) => {
+                let device = device.clone();
+                run_blocking(move || {
+                    device
+                        .reset()
+                        .wait()
+                        .map_err(|e| format!("reset error: {e}"))
+                })
+                .await
+            }
             None => Err(napi::Error::from_reason("reset error: invalid state")),
         }
     }
@@ -385,12 +409,14 @@ impl UsbDevice {
                 }
                 #[cfg(not(windows))]
                 {
-                    device
-                        .set_configuration(configurationValue)
-                        .wait()
-                        .map_err(|e| {
-                            napi::Error::from_reason(format!("selectConfiguration error: {e}"))
-                        })
+                    let device = device.clone();
+                    run_blocking(move || {
+                        device
+                            .set_configuration(configurationValue)
+                            .wait()
+                            .map_err(|e| format!("selectConfiguration error: {e}"))
+                    })
+                    .await
                 }
             }
             None => Err(napi::Error::from_reason(
@@ -403,10 +429,14 @@ impl UsbDevice {
     pub async unsafe fn claimInterface(&mut self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
             Some(device) => {
-                let interface = device
-                    .claim_interface(interfaceNumber)
-                    .wait()
-                    .map_err(|e| napi::Error::from_reason(format!("claimInterface error: {e}")))?;
+                let device = device.clone();
+                let interface = run_blocking(move || {
+                    device
+                        .claim_interface(interfaceNumber)
+                        .wait()
+                        .map_err(|e| format!("claimInterface error: {e}"))
+                })
+                .await?;
                 self.interfaces[interfaceNumber as usize] = Some(interface);
                 Ok(())
             }
@@ -442,12 +472,14 @@ impl UsbDevice {
     ) -> Result<()> {
         match &self.interfaces[interfaceNumber as usize] {
             Some(interface) => {
-                interface
-                    .set_alt_setting(alternateSetting)
-                    .wait()
-                    .map_err(|e| {
-                        napi::Error::from_reason(format!("selectAlternateInterface error: {e}"))
-                    })?;
+                let interface = interface.clone();
+                run_blocking(move || {
+                    interface
+                        .set_alt_setting(alternateSetting)
+                        .wait()
+                        .map_err(|e| format!("selectAlternateInterface error: {e}"))
+                })
+                .await?;
                 Ok(())
             }
             None => Err(napi::Error::from_reason(
@@ -478,22 +510,23 @@ impl UsbDevice {
         };
         match self.get_interface(recipient, setup.index) {
             Some(interface) => {
-                let result = interface
-                    .control_in(
-                        nusb::transfer::ControlIn {
-                            control_type,
-                            recipient,
-                            request: setup.request,
-                            value: setup.value,
-                            index: setup.index,
-                            length,
-                        },
-                        Duration::from_millis(timeout as u64),
-                    )
-                    .wait()
-                    .map_err(|e| {
-                        napi::Error::from_reason(format!("controlTransferIn error: {e}"))
-                    })?;
+                let result = run_blocking(move || {
+                    interface
+                        .control_in(
+                            nusb::transfer::ControlIn {
+                                control_type,
+                                recipient,
+                                request: setup.request,
+                                value: setup.value,
+                                index: setup.index,
+                                length,
+                            },
+                            Duration::from_millis(timeout as u64),
+                        )
+                        .wait()
+                        .map_err(|e| format!("controlTransferIn error: {e}"))
+                })
+                .await?;
                 Ok(Some(Uint8Array::from(result)))
             }
             None => Err(napi::Error::from_reason(
@@ -525,23 +558,25 @@ impl UsbDevice {
         match self.get_interface(recipient, setup.index) {
             Some(interface) => {
                 let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
-                interface
-                    .control_out(
-                        nusb::transfer::ControlOut {
-                            control_type,
-                            recipient,
-                            request: setup.request,
-                            value: setup.value,
-                            index: setup.index,
-                            data: &bytes,
-                        },
-                        Duration::from_millis(timeout as u64),
-                    )
-                    .wait()
-                    .map_err(|e| {
-                        napi::Error::from_reason(format!("controlTransferOut error: {e}"))
-                    })?;
-                Ok(bytes.len() as u32)
+                let bytes_len = bytes.len();
+                run_blocking(move || {
+                    interface
+                        .control_out(
+                            nusb::transfer::ControlOut {
+                                control_type,
+                                recipient,
+                                request: setup.request,
+                                value: setup.value,
+                                index: setup.index,
+                                data: &bytes,
+                            },
+                            Duration::from_millis(timeout as u64),
+                        )
+                        .wait()
+                        .map_err(|e| format!("controlTransferOut error: {e}"))
+                })
+                .await?;
+                Ok(bytes_len as u32)
             }
             None => Err(napi::Error::from_reason(
                 "controlTransferOut error: invalid state",
@@ -558,17 +593,21 @@ impl UsbDevice {
     ) -> Result<Option<Uint8Array>> {
         match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
             Some(mut endpoint) => {
-                let packet_size = endpoint.max_packet_size();
-                let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
-                let buf = Buffer::new(req);
-                let completion =
-                    endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                completion
-                    .status
-                    .map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
-                let mut v = completion.buffer.into_vec();
-                v.truncate(completion.actual_len.min(length as usize));
-                return Ok(Some(Uint8Array::from(v)));
+                let v = run_blocking(move || {
+                    let packet_size = endpoint.max_packet_size();
+                    let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
+                    let buf = Buffer::new(req);
+                    let completion =
+                        endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
+                    completion
+                        .status
+                        .map_err(|e| format!("transferIn error: {e:?}"))?;
+                    let mut v = completion.buffer.into_vec();
+                    v.truncate(completion.actual_len.min(length as usize));
+                    Ok(v)
+                })
+                .await?;
+                Ok(Some(Uint8Array::from(v)))
             }
             None => {
                 return Err(napi::Error::from_reason(
@@ -587,14 +626,18 @@ impl UsbDevice {
     ) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(mut endpoint) => {
-                let mut buf = Buffer::new(data.len());
-                buf.extend_from_slice(&data);
-                let completion =
-                    endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                completion
-                    .status
-                    .map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
-                return Ok(completion.actual_len as u32);
+                let data = data.to_vec();
+                run_blocking(move || {
+                    let mut buf = Buffer::new(data.len());
+                    buf.extend_from_slice(&data);
+                    let completion =
+                        endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
+                    completion
+                        .status
+                        .map_err(|e| format!("transferOut error: {e:?}"))?;
+                    Ok(completion.actual_len as u32)
+                })
+                .await
             }
             None => {
                 return Err(napi::Error::from_reason(
@@ -644,10 +687,13 @@ impl UsbDevice {
         if direction == "in" {
             match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
                 Some(mut endpoint) => {
-                    endpoint
-                        .clear_halt()
-                        .wait()
-                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                    run_blocking(move || {
+                        endpoint
+                            .clear_halt()
+                            .wait()
+                            .map_err(|e| format!("clearHalt error: {e}"))
+                    })
+                    .await?;
                 }
                 None => {
                     return Err(napi::Error::from_reason(
@@ -658,10 +704,13 @@ impl UsbDevice {
         } else {
             match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
                 Some(mut endpoint) => {
-                    endpoint
-                        .clear_halt()
-                        .wait()
-                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                    run_blocking(move || {
+                        endpoint
+                            .clear_halt()
+                            .wait()
+                            .map_err(|e| format!("clearHalt error: {e}"))
+                    })
+                    .await?;
                 }
                 None => {
                     return Err(napi::Error::from_reason(
@@ -677,9 +726,15 @@ impl UsbDevice {
     #[napi]
     pub async fn detachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
-            Some(device) => device
-                .detach_kernel_driver(interfaceNumber)
-                .map_err(|e| napi::Error::from_reason(format!("detachKernelDriver error: {e}"))),
+            Some(device) => {
+                let device = device.clone();
+                run_blocking(move || {
+                    device
+                        .detach_kernel_driver(interfaceNumber)
+                        .map_err(|e| format!("detachKernelDriver error: {e}"))
+                })
+                .await
+            }
             None => Err(napi::Error::from_reason(
                 "detachKernelDriver error: invalid state",
             )),
@@ -689,9 +744,15 @@ impl UsbDevice {
     #[napi]
     pub async fn attachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
         match &self.device {
-            Some(device) => device
-                .attach_kernel_driver(interfaceNumber)
-                .map_err(|e| napi::Error::from_reason(format!("attachKernelDriver error: {e}"))),
+            Some(device) => {
+                let device = device.clone();
+                run_blocking(move || {
+                    device
+                        .attach_kernel_driver(interfaceNumber)
+                        .map_err(|e| format!("attachKernelDriver error: {e}"))
+                })
+                .await
+            }
             None => Err(napi::Error::from_reason(
                 "attachKernelDriver error: invalid state",
             )),
