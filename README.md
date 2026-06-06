@@ -8,6 +8,8 @@ Node.JS library for communicating with USB devices.
 
 This is a complete rewrite in rust using [@kevinmehall](https://github.com/kevinmehall)'s excellent [nusb library](https://docs.rs/nusb/latest/nusb) and [napi-rs](https://napi.rs/).
 
+For the previous v2.x.x version of node-usb, please see https://github.com/node-usb/node-usb.
+
 # License
 [MIT](LICENSE.md)
 
@@ -151,11 +153,13 @@ If using a packaging system for electron, ensure the `node-usb` library does not
 - npmRebuild: false
 
 # APIs
-Since `v3.0.0`, the `node-usb` API follows the WebUSB specification which can be found here:
+Since `v3.0.0`, the API exclusively follows the WebUSB specification which can be found here:
 
 https://wicg.github.io/webusb/
 
-Two versions of the WebUSB API exist by default:
+If you want to use the older `Legacy API`, please install [v2.x.x of node-usb](https://github.com/node-usb/node-usb).
+
+Two versions of the API exist by default:
 
 - `usb` - which exposes all functionality in an unrestricted manner (e.g. without needing to `requestDevice()` first)
 - `webusb` - which follows the WebUSB specification exactly and requires the user to authorise devices via `requestDevice()` first.
