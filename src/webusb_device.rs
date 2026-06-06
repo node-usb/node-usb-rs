@@ -73,14 +73,20 @@ pub struct UsbAlternateInterface {
 }
 
 impl UsbAlternateInterface {
-    pub fn new(device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptor) -> Result<Self> {
+    pub fn new(
+        device: &nusb::Device,
+        iface: nusb::descriptors::InterfaceDescriptor,
+    ) -> Result<Self> {
         Ok(Self {
             alternateSetting: iface.alternate_setting(),
             interfaceClass: iface.class(),
             interfaceSubclass: iface.subclass(),
             interfaceProtocol: iface.protocol(),
             interfaceName: get_string(device, iface.string_index())?,
-            endpoints: iface.endpoints().map(|endpoint| UsbEndpoint::new(endpoint)).collect(),
+            endpoints: iface
+                .endpoints()
+                .map(|endpoint| UsbEndpoint::new(endpoint))
+                .collect(),
         })
     }
 }
@@ -98,12 +104,19 @@ pub struct UsbInterface {
 }
 
 impl UsbInterface {
-    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, iface: nusb::descriptors::InterfaceDescriptors) -> Result<Self> {
+    pub fn new(
+        usb_device: &UsbDevice,
+        device: &nusb::Device,
+        iface: nusb::descriptors::InterfaceDescriptors,
+    ) -> Result<Self> {
         Ok(Self {
             interfaceNumber: iface.interface_number(),
             claimed: usb_device.interfaces[iface.interface_number() as usize].is_some(),
             alternate: UsbAlternateInterface::new(&device, iface.first_alt_setting())?,
-            alternates: iface.alt_settings().map(|iface| UsbAlternateInterface::new(&device, iface)).collect::<Result<Vec<_>>>()?,
+            alternates: iface
+                .alt_settings()
+                .map(|iface| UsbAlternateInterface::new(&device, iface))
+                .collect::<Result<Vec<_>>>()?,
         })
     }
 }
@@ -119,8 +132,15 @@ pub struct UsbConfiguration {
 }
 
 impl UsbConfiguration {
-    pub fn new(usb_device: &UsbDevice, device: &nusb::Device, config: nusb::descriptors::ConfigurationDescriptor) -> Result<Self> {
-        let interfaces = config.interfaces().map(|iface| UsbInterface::new(&usb_device, &device, iface)).collect::<Result<Vec<_>>>()?;
+    pub fn new(
+        usb_device: &UsbDevice,
+        device: &nusb::Device,
+        config: nusb::descriptors::ConfigurationDescriptor,
+    ) -> Result<Self> {
+        let interfaces = config
+            .interfaces()
+            .map(|iface| UsbInterface::new(&usb_device, &device, iface))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             configurationValue: config.configuration_value(),
@@ -184,8 +204,10 @@ pub struct UsbDevice {
 #[napi]
 impl UsbDevice {
     pub fn new(device_info: nusb::DeviceInfo) -> Self {
-        let (deviceVersionMajor, deviceVersionMinor, deviceVersionSubminor) = decode_version(device_info.device_version());
-        let (usbVersionMajor, usbVersionMinor, usbVersionSubminor) = decode_version(device_info.usb_version());
+        let (deviceVersionMajor, deviceVersionMinor, deviceVersionSubminor) =
+            decode_version(device_info.device_version());
+        let (usbVersionMajor, usbVersionMinor, usbVersionSubminor) =
+            decode_version(device_info.usb_version());
 
         Self {
             device_info: device_info.clone(),
@@ -234,7 +256,10 @@ impl UsbDevice {
                     None => self._open()?,
                 };
 
-                get_string(&device, device.device_descriptor().manufacturer_string_index())
+                get_string(
+                    &device,
+                    device.device_descriptor().manufacturer_string_index(),
+                )
             }
         }
     }
@@ -264,7 +289,10 @@ impl UsbDevice {
                     None => self._open()?,
                 };
 
-                get_string(&device, device.device_descriptor().serial_number_string_index())
+                get_string(
+                    &device,
+                    device.device_descriptor().serial_number_string_index(),
+                )
             }
         }
     }
@@ -295,11 +323,17 @@ impl UsbDevice {
             None => self._open()?,
         };
 
-        device.configurations().map(|config| UsbConfiguration::new(&self, &device, config)).collect::<Result<Vec<_>>>()
+        device
+            .configurations()
+            .map(|config| UsbConfiguration::new(&self, &device, config))
+            .collect::<Result<Vec<_>>>()
     }
 
     unsafe fn _open(&mut self) -> Result<nusb::Device> {
-        self.device_info.open().wait().map_err(|e| napi::Error::from_reason(format!("open error: {e}")))
+        self.device_info
+            .open()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("open error: {e}")))
     }
 
     #[napi]
@@ -323,7 +357,10 @@ impl UsbDevice {
     #[napi]
     pub async fn reset(&self) -> Result<()> {
         match &self.device {
-            Some(device) => device.reset().wait().map_err(|e| napi::Error::from_reason(format!("reset error: {e}"))),
+            Some(device) => device
+                .reset()
+                .wait()
+                .map_err(|e| napi::Error::from_reason(format!("reset error: {e}"))),
             None => Err(napi::Error::from_reason("reset error: invalid state")),
         }
     }
@@ -332,9 +369,13 @@ impl UsbDevice {
     pub async fn selectConfiguration(&self, configurationValue: u8) -> Result<()> {
         match &self.device {
             Some(device) => {
-                let found = device.configurations().any(|c| c.configuration_value() == configurationValue);
+                let found = device
+                    .configurations()
+                    .any(|c| c.configuration_value() == configurationValue);
                 if !found {
-                    return Err(napi::Error::from_reason("selectConfiguration error: invalid configuration"));
+                    return Err(napi::Error::from_reason(
+                        "selectConfiguration error: invalid configuration",
+                    ));
                 }
 
                 #[cfg(windows)]
@@ -347,10 +388,14 @@ impl UsbDevice {
                     device
                         .set_configuration(configurationValue)
                         .wait()
-                        .map_err(|e| napi::Error::from_reason(format!("selectConfiguration error: {e}")))
+                        .map_err(|e| {
+                            napi::Error::from_reason(format!("selectConfiguration error: {e}"))
+                        })
                 }
             }
-            None => Err(napi::Error::from_reason("selectConfiguration error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "selectConfiguration error: invalid state",
+            )),
         }
     }
 
@@ -365,7 +410,9 @@ impl UsbDevice {
                 self.interfaces[interfaceNumber as usize] = Some(interface);
                 Ok(())
             }
-            None => Err(napi::Error::from_reason("claimInterface error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "claimInterface error: invalid state",
+            )),
         }
     }
 
@@ -377,28 +424,45 @@ impl UsbDevice {
                     self.interfaces[interfaceNumber as usize] = None;
                     Ok(())
                 }
-                None => Err(napi::Error::from_reason("releaseInterface error: not claimed")),
+                None => Err(napi::Error::from_reason(
+                    "releaseInterface error: not claimed",
+                )),
             },
-            None => Err(napi::Error::from_reason("releaseInterface error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "releaseInterface error: invalid state",
+            )),
         }
     }
 
     #[napi]
-    pub async unsafe fn selectAlternateInterface(&mut self, interfaceNumber: u8, alternateSetting: u8) -> Result<()> {
+    pub async unsafe fn selectAlternateInterface(
+        &mut self,
+        interfaceNumber: u8,
+        alternateSetting: u8,
+    ) -> Result<()> {
         match &self.interfaces[interfaceNumber as usize] {
             Some(interface) => {
                 interface
                     .set_alt_setting(alternateSetting)
                     .wait()
-                    .map_err(|e| napi::Error::from_reason(format!("selectAlternateInterface error: {e}")))?;
+                    .map_err(|e| {
+                        napi::Error::from_reason(format!("selectAlternateInterface error: {e}"))
+                    })?;
                 Ok(())
             }
-            None => Err(napi::Error::from_reason("selectAlternateInterface error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "selectAlternateInterface error: invalid state",
+            )),
         }
     }
 
     #[napi(js_name = "nativeControlTransferIn")]
-    pub async fn controlTransferIn(&self, setup: UsbControlTransferParameters, timeout: u32, length: u16) -> Result<Option<Uint8Array>> {
+    pub async fn controlTransferIn(
+        &self,
+        setup: UsbControlTransferParameters,
+        timeout: u32,
+        length: u16,
+    ) -> Result<Option<Uint8Array>> {
         let control_type = match setup.requestType.as_str() {
             "standard" => nusb::transfer::ControlType::Standard,
             "class" => nusb::transfer::ControlType::Class,
@@ -427,15 +491,24 @@ impl UsbDevice {
                         Duration::from_millis(timeout as u64),
                     )
                     .wait()
-                    .map_err(|e| napi::Error::from_reason(format!("controlTransferIn error: {e}")))?;
+                    .map_err(|e| {
+                        napi::Error::from_reason(format!("controlTransferIn error: {e}"))
+                    })?;
                 Ok(Some(Uint8Array::from(result)))
             }
-            None => Err(napi::Error::from_reason("controlTransferIn error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "controlTransferIn error: invalid state",
+            )),
         }
     }
 
     #[napi(js_name = "nativeControlTransferOut")]
-    pub async fn controlTransferOut(&self, setup: UsbControlTransferParameters, timeout: u32, data: Option<Uint8Array>) -> Result<u32> {
+    pub async fn controlTransferOut(
+        &self,
+        setup: UsbControlTransferParameters,
+        timeout: u32,
+        data: Option<Uint8Array>,
+    ) -> Result<u32> {
         let control_type = match setup.requestType.as_str() {
             "standard" => nusb::transfer::ControlType::Standard,
             "class" => nusb::transfer::ControlType::Class,
@@ -465,76 +538,135 @@ impl UsbDevice {
                         Duration::from_millis(timeout as u64),
                     )
                     .wait()
-                    .map_err(|e| napi::Error::from_reason(format!("controlTransferOut error: {e}")))?;
+                    .map_err(|e| {
+                        napi::Error::from_reason(format!("controlTransferOut error: {e}"))
+                    })?;
                 Ok(bytes.len() as u32)
             }
-            None => Err(napi::Error::from_reason("controlTransferOut error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "controlTransferOut error: invalid state",
+            )),
         }
     }
 
     #[napi(js_name = "nativeTransferIn")]
-    pub async fn transferIn(&self, endpointNumber: u8, timeout: u32, length: u32) -> Result<Option<Uint8Array>> {
+    pub async fn transferIn(
+        &self,
+        endpointNumber: u8,
+        timeout: u32,
+        length: u32,
+    ) -> Result<Option<Uint8Array>> {
         match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
             Some(mut endpoint) => {
                 let packet_size = endpoint.max_packet_size();
                 let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
                 let buf = Buffer::new(req);
-                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                completion.status.map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
+                let completion =
+                    endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
+                completion
+                    .status
+                    .map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
                 let mut v = completion.buffer.into_vec();
                 v.truncate(completion.actual_len.min(length as usize));
                 return Ok(Some(Uint8Array::from(v)));
             }
             None => {
-                return Err(napi::Error::from_reason("transferIn error: endpoint not found"));
+                return Err(napi::Error::from_reason(
+                    "transferIn error: endpoint not found",
+                ));
             }
         }
     }
 
     #[napi(js_name = "nativeTransferOut")]
-    pub async fn transferOut(&self, endpointNumber: u8, timeout: u32, data: Uint8Array) -> Result<u32> {
+    pub async fn transferOut(
+        &self,
+        endpointNumber: u8,
+        timeout: u32,
+        data: Uint8Array,
+    ) -> Result<u32> {
         match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
             Some(mut endpoint) => {
                 let mut buf = Buffer::new(data.len());
                 buf.extend_from_slice(&data);
-                let completion = endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                completion.status.map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
+                let completion =
+                    endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
+                completion
+                    .status
+                    .map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
                 return Ok(completion.actual_len as u32);
             }
             None => {
-                return Err(napi::Error::from_reason("transferOut error: endpoint not found"));
+                return Err(napi::Error::from_reason(
+                    "transferOut error: endpoint not found",
+                ));
             }
         }
     }
 
-    #[napi(js_name = "nativeIsochronousTransferIn", ts_return_type = "Promise<USBIsochronousInTransferResult>")]
-    pub async fn isochronousTransferIn(&self, _endpointNumber: u8, _packetLengths: Vec<u32>, _timeout: u32) -> Result<()> {
-        Err(napi::Error::from_reason("isochronousTransferIn error: method not implemented"))
+    #[napi(
+        js_name = "nativeIsochronousTransferIn",
+        ts_return_type = "Promise<USBIsochronousInTransferResult>"
+    )]
+    pub async fn isochronousTransferIn(
+        &self,
+        _endpointNumber: u8,
+        _packetLengths: Vec<u32>,
+        _timeout: u32,
+    ) -> Result<()> {
+        Err(napi::Error::from_reason(
+            "isochronousTransferIn error: method not implemented",
+        ))
     }
 
-    #[napi(js_name = "nativeIsochronousTransferOut", ts_return_type = "Promise<USBIsochronousOutTransferResult>")]
-    pub async fn isochronousTransferOut(&self, _endpointNumber: u8, _data: Uint8Array, _packetLengths: Vec<u32>, _timeout: u32) -> Result<()> {
-        Err(napi::Error::from_reason("isochronousTransferOut error: method not implemented"))
+    #[napi(
+        js_name = "nativeIsochronousTransferOut",
+        ts_return_type = "Promise<USBIsochronousOutTransferResult>"
+    )]
+    pub async fn isochronousTransferOut(
+        &self,
+        _endpointNumber: u8,
+        _data: Uint8Array,
+        _packetLengths: Vec<u32>,
+        _timeout: u32,
+    ) -> Result<()> {
+        Err(napi::Error::from_reason(
+            "isochronousTransferOut error: method not implemented",
+        ))
     }
 
     #[napi]
-    pub async fn clearHalt(&self, #[napi(ts_arg_type = "USBDirection")] direction: String, endpointNumber: u8) -> Result<()> {
+    pub async fn clearHalt(
+        &self,
+        #[napi(ts_arg_type = "USBDirection")] direction: String,
+        endpointNumber: u8,
+    ) -> Result<()> {
         if direction == "in" {
             match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
                 Some(mut endpoint) => {
-                    endpoint.clear_halt().wait().map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                    endpoint
+                        .clear_halt()
+                        .wait()
+                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
                 }
                 None => {
-                    return Err(napi::Error::from_reason("clearHalt error: endpoint not found"));
+                    return Err(napi::Error::from_reason(
+                        "clearHalt error: endpoint not found",
+                    ));
                 }
             }
         } else {
             match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
                 Some(mut endpoint) => {
-                    endpoint.clear_halt().wait().map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
+                    endpoint
+                        .clear_halt()
+                        .wait()
+                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
                 }
                 None => {
-                    return Err(napi::Error::from_reason("clearHalt error: endpoint not found"));
+                    return Err(napi::Error::from_reason(
+                        "clearHalt error: endpoint not found",
+                    ));
                 }
             }
         }
@@ -548,7 +680,9 @@ impl UsbDevice {
             Some(device) => device
                 .detach_kernel_driver(interfaceNumber)
                 .map_err(|e| napi::Error::from_reason(format!("detachKernelDriver error: {e}"))),
-            None => Err(napi::Error::from_reason("detachKernelDriver error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "detachKernelDriver error: invalid state",
+            )),
         }
     }
 
@@ -558,14 +692,24 @@ impl UsbDevice {
             Some(device) => device
                 .attach_kernel_driver(interfaceNumber)
                 .map_err(|e| napi::Error::from_reason(format!("attachKernelDriver error: {e}"))),
-            None => Err(napi::Error::from_reason("attachKernelDriver error: invalid state")),
+            None => Err(napi::Error::from_reason(
+                "attachKernelDriver error: invalid state",
+            )),
         }
     }
 
-    fn get_interface(&self, recipient: nusb::transfer::Recipient, index: u16) -> Option<nusb::Interface> {
+    fn get_interface(
+        &self,
+        recipient: nusb::transfer::Recipient,
+        index: u16,
+    ) -> Option<nusb::Interface> {
         if recipient == nusb::transfer::Recipient::Interface {
             // If recipient is interface and index matches a claimed interface number use that interface
-            if let Some(interface) = self.interfaces.get(index as usize).and_then(|interface| interface.clone()) {
+            if let Some(interface) = self
+                .interfaces
+                .get(index as usize)
+                .and_then(|interface| interface.clone())
+            {
                 return Some(interface);
             }
         }
@@ -597,7 +741,10 @@ impl UsbDevice {
         None
     }
 
-    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(&self, endpointNumber: u8) -> Option<nusb::Endpoint<Bulk, DIR>> {
+    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(
+        &self,
+        endpointNumber: u8,
+    ) -> Option<nusb::Endpoint<Bulk, DIR>> {
         for maybe_iface in &self.interfaces {
             let iface = match maybe_iface {
                 Some(i) => i,
@@ -609,7 +756,9 @@ impl UsbDevice {
             };
 
             for endpoint in descriptor.endpoints() {
-                if endpoint.direction() == DIR::DIR && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber {
+                if endpoint.direction() == DIR::DIR
+                    && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber
+                {
                     return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
                 }
             }

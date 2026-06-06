@@ -3,7 +3,10 @@
 mod webusb_device;
 
 use futures_lite::StreamExt;
-use napi::{bindgen_prelude::*, threadsafe_function::ThreadsafeFunction, threadsafe_function::ThreadsafeFunctionCallMode};
+use napi::{
+    bindgen_prelude::*, threadsafe_function::ThreadsafeFunction,
+    threadsafe_function::ThreadsafeFunctionCallMode,
+};
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,7 +30,10 @@ pub struct Emitter {
 impl Emitter {
     #[napi(constructor)]
     pub fn new() -> Self {
-        let callbacks = Arc::new(RwLock::new(Callbacks { attach: None, detach: None }));
+        let callbacks = Arc::new(RwLock::new(Callbacks {
+            attach: None,
+            detach: None,
+        }));
         let (listeners_tx, _listeners_rx) = watch::channel(false);
         Self {
             callbacks,
@@ -90,26 +96,40 @@ impl Emitter {
     }
 
     #[napi]
-    pub async unsafe fn addAttach(&mut self, callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>) {
-        { self.callbacks.write().await.attach = Some(callback); }
+    pub async unsafe fn addAttach(
+        &mut self,
+        callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>,
+    ) {
+        {
+            self.callbacks.write().await.attach = Some(callback);
+        }
         self.publishState().await;
     }
 
     #[napi]
     pub async unsafe fn removeAttach(&mut self) {
-        { self.callbacks.write().await.attach = None; }
+        {
+            self.callbacks.write().await.attach = None;
+        }
         self.publishState().await;
     }
 
     #[napi]
-    pub async unsafe fn addDetach(&mut self, callback: ThreadsafeFunction<String, (), String, napi::Status, false>) {
-        { self.callbacks.write().await.detach = Some(callback); }
+    pub async unsafe fn addDetach(
+        &mut self,
+        callback: ThreadsafeFunction<String, (), String, napi::Status, false>,
+    ) {
+        {
+            self.callbacks.write().await.detach = Some(callback);
+        }
         self.publishState().await;
     }
 
     #[napi]
     pub async unsafe fn removeDetach(&mut self) {
-        { self.callbacks.write().await.detach = None; }
+        {
+            self.callbacks.write().await.detach = None;
+        }
         self.publishState().await;
     }
 
@@ -124,14 +144,20 @@ impl Emitter {
 
 #[napi(js_name = "nativeGetDevices")]
 pub async fn getDevices() -> Result<Vec<UsbDevice>> {
-    let devices = nusb::list_devices().wait().map_err(|e| napi::Error::from_reason(format!("getDevices error: {e}")))?;
+    let devices = nusb::list_devices()
+        .wait()
+        .map_err(|e| napi::Error::from_reason(format!("getDevices error: {e}")))?;
     Ok(devices.map(UsbDevice::new).collect())
 }
 
 #[napi(js_name = "nativeFindDeviceByIds")]
 pub async fn findDeviceByIds(vendorId: u16, productId: u16) -> Result<Option<UsbDevice>> {
-    let mut devices = nusb::list_devices().wait().map_err(|e| napi::Error::from_reason(format!("findDeviceByIds error: {e}")))?;
-    Ok(devices.find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId).map(UsbDevice::new))
+    let mut devices = nusb::list_devices()
+        .wait()
+        .map_err(|e| napi::Error::from_reason(format!("findDeviceByIds error: {e}")))?;
+    Ok(devices
+        .find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId)
+        .map(UsbDevice::new))
 }
 
 #[napi(js_name = "nativeFindDeviceBySerial")]
@@ -139,5 +165,7 @@ pub async fn findDeviceBySerial(serialNumber: String) -> Result<Option<UsbDevice
     let mut devices = nusb::list_devices()
         .wait()
         .map_err(|e| napi::Error::from_reason(format!("findDeviceBySerial error: {e}")))?;
-    Ok(devices.find(|dev| dev.serial_number() == Some(serialNumber.as_str())).map(UsbDevice::new))
+    Ok(devices
+        .find(|dev| dev.serial_number() == Some(serialNumber.as_str()))
+        .map(UsbDevice::new))
 }
