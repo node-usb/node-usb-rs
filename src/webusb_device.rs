@@ -1,6 +1,13 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use nusb::{descriptors::language_id::US_ENGLISH, transfer::Buffer, transfer::Bulk, MaybeFuture};
+use nusb::{
+    descriptors::language_id::US_ENGLISH,
+    descriptors::TransferType,
+    transfer::Buffer,
+    transfer::Bulk,
+    transfer::Interrupt,
+    MaybeFuture,
+};
 use std::time::Duration;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
@@ -33,6 +40,41 @@ where
         .await
         .map_err(|e| napi::Error::from_reason(format!("blocking task error: {e}")))?
         .map_err(napi::Error::from_reason)
+}
+
+/// Enum wrapping either a Bulk or Interrupt endpoint.
+/// Both implement BulkOrInterrupt and share identical method signatures,
+/// but are different concrete types in Rust's type system.
+enum AnyEndpoint<DIR: nusb::transfer::EndpointDirection> {
+    Bulk(nusb::Endpoint<nusb::transfer::Bulk, DIR>),
+    Interrupt(nusb::Endpoint<nusb::transfer::Interrupt, DIR>),
+}
+
+impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
+    fn max_packet_size(&self) -> usize {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.max_packet_size(),
+            AnyEndpoint::Interrupt(ep) => ep.max_packet_size(),
+        }
+    }
+
+    fn transfer_blocking(
+        &mut self,
+        buf: nusb::transfer::Buffer,
+        timeout: Duration,
+    ) -> nusb::transfer::Completion {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.transfer_blocking(buf, timeout),
+            AnyEndpoint::Interrupt(ep) => ep.transfer_blocking(buf, timeout),
+        }
+    }
+
+    fn clear_halt_blocking(&mut self) -> std::result::Result<(), nusb::Error> {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.clear_halt().wait(),
+            AnyEndpoint::Interrupt(ep) => ep.clear_halt().wait(),
+        }
+    }
 }
 
 #[napi(object)]
@@ -689,8 +731,7 @@ impl UsbDevice {
                 Some(mut endpoint) => {
                     run_blocking(move || {
                         endpoint
-                            .clear_halt()
-                            .wait()
+                            .clear_halt_blocking()
                             .map_err(|e| format!("clearHalt error: {e}"))
                     })
                     .await?;
@@ -706,8 +747,7 @@ impl UsbDevice {
                 Some(mut endpoint) => {
                     run_blocking(move || {
                         endpoint
-                            .clear_halt()
-                            .wait()
+                            .clear_halt_blocking()
                             .map_err(|e| format!("clearHalt error: {e}"))
                     })
                     .await?;
@@ -805,7 +845,7 @@ impl UsbDevice {
     fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(
         &self,
         endpointNumber: u8,
-    ) -> Option<nusb::Endpoint<Bulk, DIR>> {
+    ) -> Option<AnyEndpoint<DIR>> {
         for maybe_iface in &self.interfaces {
             let iface = match maybe_iface {
                 Some(i) => i,
@@ -816,11 +856,20 @@ impl UsbDevice {
                 continue;
             };
 
-            for endpoint in descriptor.endpoints() {
-                if endpoint.direction() == DIR::DIR
-                    && (endpoint.address() & ENDPOINT_NUMBER_MASK) == endpointNumber
+            for ep_desc in descriptor.endpoints() {
+                if ep_desc.direction() == DIR::DIR
+                    && (ep_desc.address() & ENDPOINT_NUMBER_MASK) == endpointNumber
                 {
-                    return iface.endpoint::<Bulk, DIR>(endpoint.address()).ok();
+                    let addr = ep_desc.address();
+                    return match ep_desc.transfer_type() {
+                        TransferType::Bulk => {
+                            iface.endpoint::<Bulk, DIR>(addr).ok().map(AnyEndpoint::Bulk)
+                        }
+                        TransferType::Interrupt => {
+                            iface.endpoint::<Interrupt, DIR>(addr).ok().map(AnyEndpoint::Interrupt)
+                        }
+                        _ => None,
+                    };
                 }
             }
         }
