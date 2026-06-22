@@ -590,29 +590,28 @@ impl UsbDevice {
         let recipient = recipient_from_request_recipient(&setup.recipient);
         let index = setup.index;
 
+        #[cfg(windows)]
+        let (recipient, index) = if recipient == nusb::transfer::Recipient::Device {
+            // Device control transfers use interface 0 on Windows (and must be claimed)
+            (nusb::transfer::Recipient::Interface, 0)
+        } else {
+            (recipient, index)
+        };
+
+        #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
-            #[cfg(windows)]
-            {
-                // Device control transfers use interface 0 on Windows (and must be claimed)
-                recipient = nusb::transfer::Recipient::Interface;
-                index = 0;
-            }
-            #[cfg(not(windows))]
-            {
-                let device = self.device.as_ref().cloned().ok_or_else(|| {
-                    napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
-                })?;
-                let request =
-                    control_in_setup(&setup, control_type, recipient, setup.index, length);
-                let result = run_blocking(move || {
-                    device
-                        .control_in(request, Duration::from_millis(timeout as u64))
-                        .wait()
-                        .map_err(|e| format!("controlTransferIn error: {e}"))
-                })
-                .await?;
-                return Ok(Some(Uint8Array::from(result)));
-            }
+            let device = self.device.as_ref().cloned().ok_or_else(|| {
+                napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
+            })?;
+            let request = control_in_setup(&setup, control_type, recipient, setup.index, length);
+            let result = run_blocking(move || {
+                device
+                    .control_in(request, Duration::from_millis(timeout as u64))
+                    .wait()
+                    .map_err(|e| format!("controlTransferIn error: {e}"))
+            })
+            .await?;
+            return Ok(Some(Uint8Array::from(result)));
         }
 
         let interface = self.get_interface(recipient, index).ok_or_else(|| {
@@ -642,29 +641,29 @@ impl UsbDevice {
         let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
         let bytes_len = bytes.len();
 
+        #[cfg(windows)]
+        let (recipient, index) = if recipient == nusb::transfer::Recipient::Device {
+            // Device control transfers use interface 0 on Windows (and must be claimed)
+            (nusb::transfer::Recipient::Interface, 0)
+        } else {
+            (recipient, index)
+        };
+
+        #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
-            #[cfg(windows)]
-            {
-                // Device control transfers use interface 0 on Windows (and must be claimed)
-                recipient = nusb::transfer::Recipient::Interface;
-                index = 0;
-            }
-            #[cfg(not(windows))]
-            {
-                let device = self.device.as_ref().cloned().ok_or_else(|| {
-                    napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
-                })?;
-                run_blocking(move || {
-                    let request =
-                        control_out_setup(&setup, control_type, recipient, setup.index, &bytes);
-                    device
-                        .control_out(request, Duration::from_millis(timeout as u64))
-                        .wait()
-                        .map_err(|e| format!("controlTransferOut error: {e}"))
-                })
-                .await?;
-                return Ok(bytes_len as u32);
-            }
+            let device = self.device.as_ref().cloned().ok_or_else(|| {
+                napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
+            })?;
+            run_blocking(move || {
+                let request =
+                    control_out_setup(&setup, control_type, recipient, setup.index, &bytes);
+                device
+                    .control_out(request, Duration::from_millis(timeout as u64))
+                    .wait()
+                    .map_err(|e| format!("controlTransferOut error: {e}"))
+            })
+            .await?;
+            return Ok(bytes_len as u32);
         }
 
         let interface = self.get_interface(recipient, index).ok_or_else(|| {
