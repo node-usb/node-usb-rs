@@ -1,12 +1,8 @@
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use nusb::{
-    descriptors::language_id::US_ENGLISH,
-    descriptors::TransferType,
-    transfer::Buffer,
-    transfer::Bulk,
-    transfer::Interrupt,
-    MaybeFuture,
+    descriptors::language_id::US_ENGLISH, descriptors::TransferType, transfer::Buffer,
+    transfer::Bulk, transfer::Interrupt, MaybeFuture,
 };
 use std::time::Duration;
 
@@ -862,12 +858,14 @@ impl UsbDevice {
                 {
                     let addr = ep_desc.address();
                     return match ep_desc.transfer_type() {
-                        TransferType::Bulk => {
-                            iface.endpoint::<Bulk, DIR>(addr).ok().map(AnyEndpoint::Bulk)
-                        }
-                        TransferType::Interrupt => {
-                            iface.endpoint::<Interrupt, DIR>(addr).ok().map(AnyEndpoint::Interrupt)
-                        }
+                        TransferType::Bulk => iface
+                            .endpoint::<Bulk, DIR>(addr)
+                            .ok()
+                            .map(AnyEndpoint::Bulk),
+                        TransferType::Interrupt => iface
+                            .endpoint::<Interrupt, DIR>(addr)
+                            .ok()
+                            .map(AnyEndpoint::Interrupt),
                         _ => None,
                     };
                 }
