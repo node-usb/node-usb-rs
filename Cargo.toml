@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 futures-lite = "2.6.1"
 napi = { version = "3.9.0", features = ["tokio_rt"] }
 napi-derive = "3.5.6"
-nusb = "=0.2.3"
+nusb = "=0.2.4"
 tokio = { version = "1.52.3", features = ["rt", "time", "fs", "macros"] }
 
 [build-dependencies]
