@@ -2,7 +2,7 @@ version: 2
 
 updates:
   # Maintain dependencies for Rust
-  - package-ecosystem: "rust-toolchain"
+  - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
