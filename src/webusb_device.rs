@@ -588,15 +588,6 @@ impl UsbDevice {
     ) -> Result<Option<Uint8Array>> {
         let control_type = control_type_from_request_type(&setup.requestType);
         let recipient = recipient_from_request_recipient(&setup.recipient);
-        let index = setup.index;
-
-        #[cfg(windows)]
-        let (recipient, index) = if recipient == nusb::transfer::Recipient::Device {
-            // Device control transfers use interface 0 on Windows (and must be claimed)
-            (nusb::transfer::Recipient::Interface, 0)
-        } else {
-            (recipient, index)
-        };
 
         #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
@@ -614,10 +605,10 @@ impl UsbDevice {
             return Ok(Some(Uint8Array::from(result)));
         }
 
-        let interface = self.get_interface(recipient, index).ok_or_else(|| {
+        let interface = self.get_interface(recipient, setup.index).ok_or_else(|| {
             napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
         })?;
-        let request = control_in_setup(&setup, control_type, recipient, index, length);
+        let request = control_in_setup(&setup, control_type, recipient, setup.index, length);
         let result = run_blocking(move || {
             interface
                 .control_in(request, Duration::from_millis(timeout as u64))
@@ -637,17 +628,8 @@ impl UsbDevice {
     ) -> Result<u32> {
         let control_type = control_type_from_request_type(&setup.requestType);
         let recipient = recipient_from_request_recipient(&setup.recipient);
-        let index = setup.index;
         let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
         let bytes_len = bytes.len();
-
-        #[cfg(windows)]
-        let (recipient, index) = if recipient == nusb::transfer::Recipient::Device {
-            // Device control transfers use interface 0 on Windows (and must be claimed)
-            (nusb::transfer::Recipient::Interface, 0)
-        } else {
-            (recipient, index)
-        };
 
         #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
@@ -666,11 +648,11 @@ impl UsbDevice {
             return Ok(bytes_len as u32);
         }
 
-        let interface = self.get_interface(recipient, index).ok_or_else(|| {
+        let interface = self.get_interface(recipient, setup.index).ok_or_else(|| {
             napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
         })?;
         run_blocking(move || {
-            let request = control_out_setup(&setup, control_type, recipient, index, &bytes);
+            let request = control_out_setup(&setup, control_type, recipient, setup.index, &bytes);
             interface
                 .control_out(request, Duration::from_millis(timeout as u64))
                 .wait()
@@ -888,7 +870,7 @@ impl UsbDevice {
             }
         }
 
-        // Return any claimed interface
+        // Return any claimed interface (e.g. for device control transfers on Windows)
         let maybe_iface = self.interfaces.iter().find_map(|x| x.clone());
         if maybe_iface.is_some() {
             return maybe_iface;
