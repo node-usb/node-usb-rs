@@ -142,7 +142,6 @@ class WebUSB extends EventTarget implements USB {
 
     constructor(private options: USBOptions = {}) {
         super();
-        this.nativeEmitter.init();
     }
 
     private deviceConnectCallback = async (device: UsbDevice) => {
