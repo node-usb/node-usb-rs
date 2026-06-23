@@ -27,6 +27,59 @@ fn get_string(device: &nusb::Device, index: Option<std::num::NonZeroU8>) -> Resu
     }
 }
 
+fn control_type_from_request_type(request_type: &str) -> nusb::transfer::ControlType {
+    match request_type {
+        "standard" => nusb::transfer::ControlType::Standard,
+        "class" => nusb::transfer::ControlType::Class,
+        "vendor" => nusb::transfer::ControlType::Vendor,
+        _ => nusb::transfer::ControlType::Standard,
+    }
+}
+
+fn recipient_from_request_recipient(recipient: &str) -> nusb::transfer::Recipient {
+    match recipient {
+        "device" => nusb::transfer::Recipient::Device,
+        "interface" => nusb::transfer::Recipient::Interface,
+        "endpoint" => nusb::transfer::Recipient::Endpoint,
+        "other" => nusb::transfer::Recipient::Other,
+        _ => nusb::transfer::Recipient::Other,
+    }
+}
+
+fn control_in_setup(
+    setup: &UsbControlTransferParameters,
+    control_type: nusb::transfer::ControlType,
+    recipient: nusb::transfer::Recipient,
+    index: u16,
+    length: u16,
+) -> nusb::transfer::ControlIn {
+    nusb::transfer::ControlIn {
+        control_type,
+        recipient,
+        request: setup.request,
+        value: setup.value,
+        index,
+        length,
+    }
+}
+
+fn control_out_setup<'a>(
+    setup: &UsbControlTransferParameters,
+    control_type: nusb::transfer::ControlType,
+    recipient: nusb::transfer::Recipient,
+    index: u16,
+    data: &'a [u8],
+) -> nusb::transfer::ControlOut<'a> {
+    nusb::transfer::ControlOut {
+        control_type,
+        recipient,
+        request: setup.request,
+        value: setup.value,
+        index,
+        data,
+    }
+}
+
 pub(crate) async fn run_blocking<T, F>(f: F) -> Result<T>
 where
     T: Send + 'static,
@@ -533,44 +586,37 @@ impl UsbDevice {
         timeout: u32,
         length: u16,
     ) -> Result<Option<Uint8Array>> {
-        let control_type = match setup.requestType.as_str() {
-            "standard" => nusb::transfer::ControlType::Standard,
-            "class" => nusb::transfer::ControlType::Class,
-            "vendor" => nusb::transfer::ControlType::Vendor,
-            _ => nusb::transfer::ControlType::Standard,
-        };
-        let recipient = match setup.recipient.as_str() {
-            "device" => nusb::transfer::Recipient::Device,
-            "interface" => nusb::transfer::Recipient::Interface,
-            "endpoint" => nusb::transfer::Recipient::Endpoint,
-            "other" => nusb::transfer::Recipient::Other,
-            _ => nusb::transfer::Recipient::Other,
-        };
-        match self.get_interface(recipient, setup.index) {
-            Some(interface) => {
-                let result = run_blocking(move || {
-                    interface
-                        .control_in(
-                            nusb::transfer::ControlIn {
-                                control_type,
-                                recipient,
-                                request: setup.request,
-                                value: setup.value,
-                                index: setup.index,
-                                length,
-                            },
-                            Duration::from_millis(timeout as u64),
-                        )
-                        .wait()
-                        .map_err(|e| format!("controlTransferIn error: {e}"))
-                })
-                .await?;
-                Ok(Some(Uint8Array::from(result)))
-            }
-            None => Err(napi::Error::from_reason(
-                "controlTransferIn error: invalid state",
-            )),
+        let control_type = control_type_from_request_type(&setup.requestType);
+        let recipient = recipient_from_request_recipient(&setup.recipient);
+
+        #[cfg(not(windows))]
+        if recipient == nusb::transfer::Recipient::Device {
+            let device = self.device.as_ref().cloned().ok_or_else(|| {
+                napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
+            })?;
+            let request = control_in_setup(&setup, control_type, recipient, setup.index, length);
+            let result = run_blocking(move || {
+                device
+                    .control_in(request, Duration::from_millis(timeout as u64))
+                    .wait()
+                    .map_err(|e| format!("controlTransferIn error: {e}"))
+            })
+            .await?;
+            return Ok(Some(Uint8Array::from(result)));
         }
+
+        let interface = self.get_interface(recipient, setup.index).ok_or_else(|| {
+            napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
+        })?;
+        let request = control_in_setup(&setup, control_type, recipient, setup.index, length);
+        let result = run_blocking(move || {
+            interface
+                .control_in(request, Duration::from_millis(timeout as u64))
+                .wait()
+                .map_err(|e| format!("controlTransferIn error: {e}"))
+        })
+        .await?;
+        Ok(Some(Uint8Array::from(result)))
     }
 
     #[napi(js_name = "nativeControlTransferOut")]
@@ -580,46 +626,40 @@ impl UsbDevice {
         timeout: u32,
         data: Option<Uint8Array>,
     ) -> Result<u32> {
-        let control_type = match setup.requestType.as_str() {
-            "standard" => nusb::transfer::ControlType::Standard,
-            "class" => nusb::transfer::ControlType::Class,
-            "vendor" => nusb::transfer::ControlType::Vendor,
-            _ => nusb::transfer::ControlType::Standard,
-        };
-        let recipient = match setup.recipient.as_str() {
-            "device" => nusb::transfer::Recipient::Device,
-            "interface" => nusb::transfer::Recipient::Interface,
-            "endpoint" => nusb::transfer::Recipient::Endpoint,
-            "other" => nusb::transfer::Recipient::Other,
-            _ => nusb::transfer::Recipient::Other,
-        };
-        match self.get_interface(recipient, setup.index) {
-            Some(interface) => {
-                let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
-                let bytes_len = bytes.len();
-                run_blocking(move || {
-                    interface
-                        .control_out(
-                            nusb::transfer::ControlOut {
-                                control_type,
-                                recipient,
-                                request: setup.request,
-                                value: setup.value,
-                                index: setup.index,
-                                data: &bytes,
-                            },
-                            Duration::from_millis(timeout as u64),
-                        )
-                        .wait()
-                        .map_err(|e| format!("controlTransferOut error: {e}"))
-                })
-                .await?;
-                Ok(bytes_len as u32)
-            }
-            None => Err(napi::Error::from_reason(
-                "controlTransferOut error: invalid state",
-            )),
+        let control_type = control_type_from_request_type(&setup.requestType);
+        let recipient = recipient_from_request_recipient(&setup.recipient);
+        let bytes = data.map(|b| b.to_vec()).unwrap_or_default();
+        let bytes_len = bytes.len();
+
+        #[cfg(not(windows))]
+        if recipient == nusb::transfer::Recipient::Device {
+            let device = self.device.as_ref().cloned().ok_or_else(|| {
+                napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
+            })?;
+            run_blocking(move || {
+                let request =
+                    control_out_setup(&setup, control_type, recipient, setup.index, &bytes);
+                device
+                    .control_out(request, Duration::from_millis(timeout as u64))
+                    .wait()
+                    .map_err(|e| format!("controlTransferOut error: {e}"))
+            })
+            .await?;
+            return Ok(bytes_len as u32);
         }
+
+        let interface = self.get_interface(recipient, setup.index).ok_or_else(|| {
+            napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
+        })?;
+        run_blocking(move || {
+            let request = control_out_setup(&setup, control_type, recipient, setup.index, &bytes);
+            interface
+                .control_out(request, Duration::from_millis(timeout as u64))
+                .wait()
+                .map_err(|e| format!("controlTransferOut error: {e}"))
+        })
+        .await?;
+        Ok(bytes_len as u32)
     }
 
     #[napi(js_name = "nativeTransferIn")]
@@ -830,7 +870,7 @@ impl UsbDevice {
             }
         }
 
-        // Return any claimed interface
+        // Return any claimed interface (e.g. for device control transfers on Windows)
         let maybe_iface = self.interfaces.iter().find_map(|x| x.clone());
         if maybe_iface.is_some() {
             return maybe_iface;

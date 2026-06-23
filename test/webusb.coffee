@@ -185,15 +185,15 @@ describe 'Alternates', ->
         device.close()
         await new Promise (resolve) -> setTimeout(resolve, 1000)
 
-describe 'Transfers', ->
+describe 'Control Transfers', ->
     device = null
     b1 = Uint8Array.from([0x30...0x40]).buffer
-    b2 = Uint8Array.from([0x32...0x42]).buffer
 
     before ->
         device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
         await device.open()
-        await device.claimInterface(0)
+        if process.platform == 'win32'
+            await device.claimInterface(0)
 
     it 'should control transfer OUT', ->
         transferResult = await device.controlTransferOut({
@@ -222,6 +222,20 @@ describe 'Transfers', ->
         expectedBuffer = Buffer.from(b1, 0, b1.byteLength);
         assert(resultBuffer.equals(expectedBuffer));
 
+    after -> 
+        if process.platform == 'win32'
+            await device.releaseInterface(0)
+        device.close()
+
+describe 'Transfers', ->
+    device = null
+    b2 = Uint8Array.from([0x32...0x42]).buffer
+
+    before ->
+        device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
+        await device.open()
+        await device.claimInterface(0)
+
     it 'should transfer OUT', ->
         transferResult = await device.transferOut(4, b2)
 
@@ -248,8 +262,24 @@ describe 'Throwing Transfers', ->
     before ->
         device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
 
+    it 'should fail control transfer unless opened', ->
+        assert.rejects(device.controlTransferIn({
+            requestType: 'vendor',
+            recipient: 'device',
+            request: 0x81,
+            value: 0,
+            index: 0
+        }, 128), 'The device must be opened first')
+
     it 'should fail transfer unless opened', ->
         assert.rejects(device.transferIn(1, 64), 'The device must be opened first')
+
+    it 'should fail transfer unless claimed', ->
+        await device.open()
+        assert.rejects(device.transferIn(1, 64), 'The device must be claimed first')
+
+    after -> 
+        device.close()
 
 describe 'WebUSB Hotplug', ->
     it 'should detect disconnect', (done) ->
