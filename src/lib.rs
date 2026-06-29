@@ -9,8 +9,8 @@ use napi::{
 };
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
-use std::sync::Arc;
-use tokio::{sync::RwLock, task::JoinHandle};
+use std::sync::{Arc, Mutex, MutexGuard};
+use tokio::task::JoinHandle;
 use webusb_device::{run_blocking, UsbDevice};
 
 struct Callbacks {
@@ -18,17 +18,27 @@ struct Callbacks {
     detach: Option<ThreadsafeFunction<String, (), String, napi::Status, false>>,
 }
 
+fn callbacks_guard(callbacks: &Mutex<Callbacks>) -> MutexGuard<'_, Callbacks> {
+    callbacks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[napi]
 pub struct Emitter {
-    callbacks: Arc<RwLock<Callbacks>>,
+    callbacks: Arc<Mutex<Callbacks>>,
     watch_task: Option<JoinHandle<()>>,
 }
 
 #[napi]
 impl Emitter {
+    fn callbacks(&self) -> MutexGuard<'_, Callbacks> {
+        callbacks_guard(&self.callbacks)
+    }
+
     #[napi(constructor)]
     pub fn new() -> Self {
-        let callbacks = Arc::new(RwLock::new(Callbacks {
+        let callbacks = Arc::new(Mutex::new(Callbacks {
             attach: None,
             detach: None,
         }));
@@ -58,7 +68,7 @@ impl Emitter {
             while let Some(ev) = watch_stream.next().await {
                 match ev {
                     HotplugEvent::Connected(info) => {
-                        let guard = callbacks.read().await;
+                        let guard = callbacks_guard(&callbacks);
                         if let Some(cb) = guard.attach.as_ref() {
                             cb.call(
                                 UsbDevice::new(info),
@@ -67,7 +77,7 @@ impl Emitter {
                         }
                     }
                     HotplugEvent::Disconnected(id) => {
-                        let guard = callbacks.read().await;
+                        let guard = callbacks_guard(&callbacks);
                         if let Some(cb) = guard.detach.as_ref() {
                             cb.call(format!("{:?}", id), ThreadsafeFunctionCallMode::NonBlocking);
                         }
@@ -81,7 +91,7 @@ impl Emitter {
 
     async fn stop_watching(&mut self) {
         let has_listeners = {
-            let cb = self.callbacks.read().await;
+            let cb = self.callbacks();
             cb.attach.is_some() || cb.detach.is_some()
         };
 
@@ -98,7 +108,7 @@ impl Emitter {
         callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>,
     ) -> Result<()> {
         {
-            self.callbacks.write().await.attach = Some(callback);
+            self.callbacks().attach = Some(callback);
         }
         self.start_watching().await
     }
@@ -106,7 +116,7 @@ impl Emitter {
     #[napi]
     pub async unsafe fn removeAttach(&mut self) {
         {
-            self.callbacks.write().await.attach = None;
+            self.callbacks().attach = None;
         }
         self.stop_watching().await;
     }
@@ -117,7 +127,7 @@ impl Emitter {
         callback: ThreadsafeFunction<String, (), String, napi::Status, false>,
     ) -> Result<()> {
         {
-            self.callbacks.write().await.detach = Some(callback);
+            self.callbacks().detach = Some(callback);
         }
         self.start_watching().await
     }
@@ -125,7 +135,7 @@ impl Emitter {
     #[napi]
     pub async unsafe fn removeDetach(&mut self) {
         {
-            self.callbacks.write().await.detach = None;
+            self.callbacks().detach = None;
         }
         self.stop_watching().await;
     }
