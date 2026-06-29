@@ -9,9 +9,8 @@ use napi::{
 };
 use napi_derive::napi;
 use nusb::{hotplug::HotplugEvent, MaybeFuture};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::{watch, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard};
+use tokio::task::JoinHandle;
 use webusb_device::{run_blocking, UsbDevice};
 
 struct Callbacks {
@@ -19,129 +18,134 @@ struct Callbacks {
     detach: Option<ThreadsafeFunction<String, (), String, napi::Status, false>>,
 }
 
+fn callbacks_guard(callbacks: &Mutex<Callbacks>) -> MutexGuard<'_, Callbacks> {
+    callbacks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[napi]
 pub struct Emitter {
-    callbacks: Arc<RwLock<Callbacks>>,
-    listeners_tx: watch::Sender<bool>,
-    initialized: AtomicBool,
+    callbacks: Arc<Mutex<Callbacks>>,
+    watch_task: Option<JoinHandle<()>>,
 }
 
 #[napi]
 impl Emitter {
+    fn callbacks(&self) -> MutexGuard<'_, Callbacks> {
+        callbacks_guard(&self.callbacks)
+    }
+
     #[napi(constructor)]
     pub fn new() -> Self {
-        let callbacks = Arc::new(RwLock::new(Callbacks {
+        let callbacks = Arc::new(Mutex::new(Callbacks {
             attach: None,
             detach: None,
         }));
-        let (listeners_tx, _listeners_rx) = watch::channel(false);
         Self {
             callbacks,
-            listeners_tx,
-            initialized: AtomicBool::new(false),
+            watch_task: None,
         }
     }
 
-    #[napi]
-    pub async fn init(&self) -> Result<()> {
-        if self.initialized.swap(true, Ordering::AcqRel) {
+    async fn start_watching(&mut self) -> Result<()> {
+        if matches!(self.watch_task.as_ref(), Some(task) if !task.is_finished()) {
             return Ok(());
         }
 
+        self.watch_task = None;
         let callbacks = self.callbacks.clone();
-        let mut listeners_rx = self.listeners_tx.subscribe();
         let mut watch_stream = match nusb::watch_devices() {
             Ok(watch_stream) => watch_stream,
             Err(e) => {
-                self.initialized.store(false, Ordering::Release);
-                return Err(napi::Error::from_reason(format!("init error: {e}")));
+                return Err(napi::Error::from_reason(format!(
+                    "watch devices error: {e}"
+                )));
             }
         };
 
-        tokio::spawn(async move {
-            loop {
-                // Async-wait until at least one listener is attached
-                if listeners_rx.wait_for(|v| *v).await.is_err() {
-                    return;
-                }
-
-                loop {
-                    tokio::select! {
-                        _ = listeners_rx.changed() => {
-                            if !*listeners_rx.borrow() {
-                                // No listeners attached, stop watching for device events
-                                break;
-                            }
+        self.watch_task = Some(tokio::spawn(async move {
+            while let Some(ev) = watch_stream.next().await {
+                match ev {
+                    HotplugEvent::Connected(info) => {
+                        let guard = callbacks_guard(&callbacks);
+                        if let Some(cb) = guard.attach.as_ref() {
+                            cb.call(
+                                UsbDevice::new(info),
+                                ThreadsafeFunctionCallMode::NonBlocking,
+                            );
                         }
-                        ev = watch_stream.next() => {
-                            match ev {
-                                Some(HotplugEvent::Connected(info)) => {
-                                    let guard = callbacks.read().await;
-                                    if let Some(cb) = guard.attach.as_ref() {
-                                        cb.call(UsbDevice::new(info), ThreadsafeFunctionCallMode::NonBlocking);
-                                    }
-                                }
-                                Some(HotplugEvent::Disconnected(id)) => {
-                                    let guard = callbacks.read().await;
-                                    if let Some(cb) = guard.detach.as_ref() {
-                                        cb.call(format!("{:?}", id), ThreadsafeFunctionCallMode::NonBlocking);
-                                    }
-                                }
-                                None => break,
-                            }
+                    }
+                    HotplugEvent::Disconnected(id) => {
+                        let guard = callbacks_guard(&callbacks);
+                        if let Some(cb) = guard.detach.as_ref() {
+                            cb.call(format!("{:?}", id), ThreadsafeFunctionCallMode::NonBlocking);
                         }
                     }
                 }
             }
-        });
+        }));
 
         Ok(())
+    }
+
+    async fn stop_watching(&mut self) {
+        let has_listeners = {
+            let cb = self.callbacks();
+            cb.attach.is_some() || cb.detach.is_some()
+        };
+
+        if !has_listeners {
+            if let Some(task) = self.watch_task.take() {
+                task.abort();
+            }
+        }
     }
 
     #[napi]
     pub async unsafe fn addAttach(
         &mut self,
         callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>,
-    ) {
+    ) -> Result<()> {
         {
-            self.callbacks.write().await.attach = Some(callback);
+            self.callbacks().attach = Some(callback);
         }
-        self.publishState().await;
+        self.start_watching().await
     }
 
     #[napi]
     pub async unsafe fn removeAttach(&mut self) {
         {
-            self.callbacks.write().await.attach = None;
+            self.callbacks().attach = None;
         }
-        self.publishState().await;
+        self.stop_watching().await;
     }
 
     #[napi]
     pub async unsafe fn addDetach(
         &mut self,
         callback: ThreadsafeFunction<String, (), String, napi::Status, false>,
-    ) {
+    ) -> Result<()> {
         {
-            self.callbacks.write().await.detach = Some(callback);
+            self.callbacks().detach = Some(callback);
         }
-        self.publishState().await;
+        self.start_watching().await
     }
 
     #[napi]
     pub async unsafe fn removeDetach(&mut self) {
         {
-            self.callbacks.write().await.detach = None;
+            self.callbacks().detach = None;
         }
-        self.publishState().await;
+        self.stop_watching().await;
     }
+}
 
-    async fn publishState(&self) {
-        let listeners = {
-            let cb = self.callbacks.read().await;
-            cb.attach.is_some() || cb.detach.is_some()
-        };
-        let _ = self.listeners_tx.send(listeners);
+impl Drop for Emitter {
+    fn drop(&mut self) {
+        if let Some(task) = self.watch_task.take() {
+            task.abort();
+        }
     }
 }
 
