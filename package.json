@@ -49,8 +49,7 @@
     "format:check": "cargo fmt -- --check",
     "full-test": "mocha --timeout 10000 --require coffeescript/register test/*.coffee",
     "prepublishOnly": "napi prepublish -t npm",
-    "preversion": "napi build --platform && git add .",
-    "version": "napi version",
+    "version": "node ./scripts/version.mjs && git add Cargo.toml",
     "create-npm-dirs": "napi create-npm-dirs",
     "docs": "typedoc"
   },
