@@ -3,7 +3,7 @@
 authors = ["Rob Moran <thegecko@github.com>"]
 edition = "2021"
 name = "usb"
-version = "3.0.0"
+version = "3.0.1"
 
 [lib]
 crate-type = ["cdylib"]
