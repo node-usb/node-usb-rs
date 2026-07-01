@@ -8,7 +8,8 @@ Node.JS library for communicating with USB devices.
 
 This is a complete rewrite in rust using [@kevinmehall](https://github.com/kevinmehall)'s excellent [nusb library](https://docs.rs/nusb/latest/nusb) and [napi-rs](https://napi.rs/).
 
-For the previous v2.x.x version of node-usb, please see https://github.com/node-usb/node-usb.
+> [!NOTE]
+> For the previous v2.x.x version of node-usb, please see https://github.com/node-usb/node-usb.
 
 # License
 [MIT](LICENSE.md)
