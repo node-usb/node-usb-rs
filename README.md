@@ -276,7 +276,7 @@ npm run build:all
 To execute the unit tests, Run:
 
 ```bash
-npm run full-test
+npm run test
 ```
 
 Some tests require an [attached STM32F103 Microprocessor USB device with specific firmware](https://github.com/node-usb/node-usb-test-firmware).
