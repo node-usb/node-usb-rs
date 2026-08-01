@@ -103,12 +103,11 @@ impl Emitter {
     }
 
     fn stop_watching(&self) {
-        // Let the callbacks lock go before taking watch_task: the watcher locks
-        // callbacks itself, so the reverse order could deadlock.
-        let has_listeners = {
-            let cb = self.callbacks();
-            cb.attach.is_some() || cb.detach.is_some()
-        };
+        // Keep the callbacks lock for the whole decision. Drop it after the
+        // check and a listener registered in the gap would find its watcher
+        // aborted here, leaving nothing watching.
+        let callbacks = self.callbacks();
+        let has_listeners = callbacks.attach.is_some() || callbacks.detach.is_some();
 
         if !has_listeners {
             if let Some(task) = watch_task_guard(&self.watch_task).take() {
