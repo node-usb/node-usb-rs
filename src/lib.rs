@@ -24,10 +24,18 @@ fn callbacks_guard(callbacks: &Mutex<Callbacks>) -> MutexGuard<'_, Callbacks> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn watch_task_guard(
+    watch_task: &Mutex<Option<JoinHandle<()>>>,
+) -> MutexGuard<'_, Option<JoinHandle<()>>> {
+    watch_task
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[napi]
 pub struct Emitter {
     callbacks: Arc<Mutex<Callbacks>>,
-    watch_task: Option<JoinHandle<()>>,
+    watch_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 #[napi]
@@ -44,16 +52,21 @@ impl Emitter {
         }));
         Self {
             callbacks,
-            watch_task: None,
+            watch_task: Arc::new(Mutex::new(None)),
         }
     }
 
-    async fn start_watching(&mut self) -> Result<()> {
-        if matches!(self.watch_task.as_ref(), Some(task) if !task.is_finished()) {
+    // addAttach and addDetach run at the same time, so one lock has to cover
+    // both the check and the store. Release it in between and each starts a
+    // watcher, which then reports every plug twice.
+    fn start_watching(&self) -> Result<()> {
+        let mut watch_task = watch_task_guard(&self.watch_task);
+
+        if matches!(watch_task.as_ref(), Some(task) if !task.is_finished()) {
             return Ok(());
         }
 
-        self.watch_task = None;
+        *watch_task = None;
         let callbacks = self.callbacks.clone();
         let mut watch_stream = match nusb::watch_devices() {
             Ok(watch_stream) => watch_stream,
@@ -64,7 +77,7 @@ impl Emitter {
             }
         };
 
-        self.watch_task = Some(tokio::spawn(async move {
+        *watch_task = Some(tokio::spawn(async move {
             while let Some(ev) = watch_stream.next().await {
                 match ev {
                     HotplugEvent::Connected(info) => {
@@ -89,61 +102,62 @@ impl Emitter {
         Ok(())
     }
 
-    async fn stop_watching(&mut self) {
-        let has_listeners = {
-            let cb = self.callbacks();
-            cb.attach.is_some() || cb.detach.is_some()
-        };
+    fn stop_watching(&self) {
+        // Keep the callbacks lock for the whole decision. Drop it after the
+        // check and a listener registered in the gap would find its watcher
+        // aborted here, leaving nothing watching.
+        let callbacks = self.callbacks();
+        let has_listeners = callbacks.attach.is_some() || callbacks.detach.is_some();
 
         if !has_listeners {
-            if let Some(task) = self.watch_task.take() {
+            if let Some(task) = watch_task_guard(&self.watch_task).take() {
                 task.abort();
             }
         }
     }
 
     #[napi]
-    pub async unsafe fn addAttach(
-        &mut self,
+    pub async fn addAttach(
+        &self,
         callback: ThreadsafeFunction<UsbDevice, (), UsbDevice, napi::Status, false>,
     ) -> Result<()> {
         {
             self.callbacks().attach = Some(callback);
         }
-        self.start_watching().await
+        self.start_watching()
     }
 
     #[napi]
-    pub async unsafe fn removeAttach(&mut self) {
+    pub async fn removeAttach(&self) {
         {
             self.callbacks().attach = None;
         }
-        self.stop_watching().await;
+        self.stop_watching();
     }
 
     #[napi]
-    pub async unsafe fn addDetach(
-        &mut self,
+    pub async fn addDetach(
+        &self,
         callback: ThreadsafeFunction<String, (), String, napi::Status, false>,
     ) -> Result<()> {
         {
             self.callbacks().detach = Some(callback);
         }
-        self.start_watching().await
+        self.start_watching()
     }
 
     #[napi]
-    pub async unsafe fn removeDetach(&mut self) {
+    pub async fn removeDetach(&self) {
         {
             self.callbacks().detach = None;
         }
-        self.stop_watching().await;
+        self.stop_watching();
     }
 }
 
 impl Drop for Emitter {
     fn drop(&mut self) {
-        if let Some(task) = self.watch_task.take() {
+        if let Some(task) = watch_task_guard(&self.watch_task).take() {
             task.abort();
         }
     }
