@@ -139,9 +139,16 @@ class WebUSB extends EventTarget implements USB {
     protected listenerCount = 0;
     protected eventListeners = new Map<string, Set<EventListener>>();
     protected knownDevices: Map<string, UsbDevice> = new Map();
+    protected nativeEmitterQueue: Promise<void> = Promise.resolve();
 
     constructor(private options: USBOptions = {}) {
         super();
+    }
+
+    private queueNativeEmitterOperation(operation: () => Promise<void>): void {
+        const pending = this.nativeEmitterQueue.then(operation);
+        this.nativeEmitterQueue = pending.catch(() => {});
+        pending.catch(error => setTimeout(() => { throw error; }, 0));
     }
 
     private deviceConnectCallback = async (device: UsbDevice) => {
@@ -183,8 +190,10 @@ class WebUSB extends EventTarget implements USB {
         }
 
         if (!hadListeners && this.listenerCount > 0) {
-            this.nativeEmitter.addAttach(this.deviceConnectCallback);
-            this.nativeEmitter.addDetach(this.deviceDisconnectCallback);
+            this.queueNativeEmitterOperation(async () => {
+                await this.nativeEmitter.addAttach(this.deviceConnectCallback);
+                await this.nativeEmitter.addDetach(this.deviceDisconnectCallback);
+            });
             nativeGetDevices().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
         }
     }
@@ -209,8 +218,10 @@ class WebUSB extends EventTarget implements USB {
         }
 
         if (removed && this.listenerCount === 0) {
-            this.nativeEmitter.removeAttach();
-            this.nativeEmitter.removeDetach();
+            this.queueNativeEmitterOperation(async () => {
+                await this.nativeEmitter.removeAttach();
+                await this.nativeEmitter.removeDetach();
+            });
             this.knownDevices.clear();
         }
     }
