@@ -35,7 +35,7 @@ fn watch_task_guard(
 #[napi]
 pub struct Emitter {
     callbacks: Arc<Mutex<Callbacks>>,
-    watch_task: Arc<Mutex<Option<JoinHandle<()>>>>,
+    watch_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 #[napi]
@@ -52,7 +52,7 @@ impl Emitter {
         }));
         Self {
             callbacks,
-            watch_task: Arc::new(Mutex::new(None)),
+            watch_task: Mutex::new(None),
         }
     }
 
