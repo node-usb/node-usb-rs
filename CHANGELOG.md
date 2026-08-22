@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.0.2] - 2026-08-22
+## [3.1.0] - 2026-08-22
 
 ### Fixed
 - Guard against multiple hotplug watchers - [`36`](https://github.com/node-usb/node-usb-rs/pull/36) ([Thomas Kirkman-Wood](https://github.com/TKDubsta))
