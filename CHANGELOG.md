@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.2] - 2026-08-22
+
+### Fixed
+- Guard against multiple hotplug watchers - [`36`](https://github.com/node-usb/node-usb-rs/pull/36) ([Thomas Kirkman-Wood](https://github.com/TKDubsta))
+
+### Changed
+- Updated nusb to v0.2.7 - [`43`](https://github.com/node-usb/node-usb-rs/pull/43) ([Rob Moran](https://github.com/thegecko))
+- Removed CoffeeScript - [`29`](https://github.com/node-usb/node-usb-rs/pull/29) ([Rob Moran](https://github.com/thegecko))
+
 ## [3.0.1] - 2026-06-30
 
 ### Fixed
