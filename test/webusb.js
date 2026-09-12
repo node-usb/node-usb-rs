@@ -311,6 +311,20 @@ describe('Transfers', () => {
         assert.equal(transferResult.bytesWritten, b2.byteLength);
     });
 
+    it('allows concurrent transferOut calls to the same endpoint', async () => {
+        const transfers = [
+            device.transferOut(4, b2),
+            device.transferOut(4, b2),
+        ];
+        const results = await Promise.allSettled(transfers);
+
+        assert.deepEqual(results.map(result => result.status), ['fulfilled', 'fulfilled']);
+        for (const result of results) {
+            assert.equal(result.value.status, 'ok');
+            assert.equal(result.value.bytesWritten, b2.byteLength);
+        }
+    });
+
     it('should transfer IN', async () => {
         const transferResult = await device.transferIn(3, b2.byteLength);
 
@@ -320,6 +334,23 @@ describe('Transfers', () => {
         const resultBuffer = Buffer.from(transferResult.data.buffer, transferResult.data.byteOffset, transferResult.data.byteLength);
         const expectedBuffer = Buffer.from(b2, 0, b2.byteLength);
         assert(resultBuffer.equals(expectedBuffer));
+    });
+
+    it('allows concurrent transferIn calls to the same endpoint', async () => {
+        await device.transferOut(4, b2);
+        await device.transferOut(4, b2);
+
+        const transfers = [
+            device.transferIn(3, b2.byteLength),
+            device.transferIn(3, b2.byteLength),
+        ];
+        const results = await Promise.allSettled(transfers);
+
+        assert.deepEqual(results.map(result => result.status), ['fulfilled', 'fulfilled']);
+        for (const result of results) {
+            assert.equal(result.value.status, 'ok');
+            assert.equal(result.value.data.byteLength, b2.byteLength);
+        }
     });
 
     after(async () => {
