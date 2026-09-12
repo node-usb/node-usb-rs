@@ -4,7 +4,7 @@ use nusb::{
     descriptors::language_id::US_ENGLISH, descriptors::TransferType, transfer::Buffer,
     transfer::Bulk, transfer::Interrupt, MaybeFuture,
 };
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, sync::Mutex, sync::MutexGuard, time::Duration};
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
 const DESC_TIMEOUT: Duration = Duration::from_millis(100);
@@ -97,6 +97,48 @@ where
 enum AnyEndpoint<DIR: nusb::transfer::EndpointDirection> {
     Bulk(nusb::Endpoint<nusb::transfer::Bulk, DIR>),
     Interrupt(nusb::Endpoint<nusb::transfer::Interrupt, DIR>),
+}
+
+struct SharedEndpointCache<T> {
+    endpoints: Mutex<HashMap<u8, Arc<Mutex<T>>>>,
+}
+
+impl<T> SharedEndpointCache<T> {
+    fn new() -> Self {
+        Self {
+            endpoints: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn guard(&self) -> MutexGuard<'_, HashMap<u8, Arc<Mutex<T>>>> {
+        self.endpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn clear(&self) {
+        self.guard().clear();
+    }
+
+    fn get_or_try_insert_with<F>(&self, endpointNumber: u8, open: F) -> Option<Arc<Mutex<T>>>
+    where
+        F: FnOnce() -> Option<T>,
+    {
+        let mut endpoints = self.guard();
+        if let Some(endpoint) = endpoints.get(&endpointNumber) {
+            return Some(endpoint.clone());
+        }
+
+        let endpoint = Arc::new(Mutex::new(open()?));
+        endpoints.insert(endpointNumber, endpoint.clone());
+        Some(endpoint)
+    }
+}
+
+fn endpoint_guard<T>(endpoint: &Mutex<T>) -> MutexGuard<'_, T> {
+    endpoint
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
@@ -268,6 +310,8 @@ pub struct UsbDevice {
     device_info: nusb::DeviceInfo,
     device: Option<nusb::Device>,
     interfaces: Vec<Option<nusb::Interface>>,
+    in_endpoints: SharedEndpointCache<AnyEndpoint<nusb::transfer::In>>,
+    out_endpoints: SharedEndpointCache<AnyEndpoint<nusb::transfer::Out>>,
 
     #[napi(writable = false)]
     pub vendorId: u16,
@@ -315,6 +359,8 @@ impl UsbDevice {
             device_info: device_info.clone(),
             device: None,
             interfaces: vec![None; 256],
+            in_endpoints: SharedEndpointCache::new(),
+            out_endpoints: SharedEndpointCache::new(),
             vendorId: device_info.vendor_id(),
             productId: device_info.product_id(),
             deviceVersionMajor,
@@ -440,6 +486,7 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn open(&mut self) -> Result<()> {
+        self.clear_endpoint_caches();
         let device_info = self.device_info.clone();
         let device = run_blocking(move || {
             device_info
@@ -454,6 +501,7 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn close(&mut self) -> Result<()> {
+        self.clear_endpoint_caches();
         self.device = None;
         Ok(())
     }
@@ -467,6 +515,7 @@ impl UsbDevice {
     pub async fn reset(&self) -> Result<()> {
         match &self.device {
             Some(device) => {
+                self.clear_endpoint_caches();
                 let device = device.clone();
                 run_blocking(move || {
                     device
@@ -474,7 +523,9 @@ impl UsbDevice {
                         .wait()
                         .map_err(|e| format!("reset error: {e}"))
                 })
-                .await
+                .await?;
+                self.clear_endpoint_caches();
+                Ok(())
             }
             None => Err(napi::Error::from_reason("reset error: invalid state")),
         }
@@ -484,6 +535,7 @@ impl UsbDevice {
     pub async fn selectConfiguration(&self, configurationValue: u8) -> Result<()> {
         match &self.device {
             Some(device) => {
+                self.clear_endpoint_caches();
                 let found = device
                     .configurations()
                     .any(|c| c.configuration_value() == configurationValue);
@@ -507,7 +559,9 @@ impl UsbDevice {
                             .wait()
                             .map_err(|e| format!("selectConfiguration error: {e}"))
                     })
-                    .await
+                    .await?;
+                    self.clear_endpoint_caches();
+                    Ok(())
                 }
             }
             None => Err(napi::Error::from_reason(
@@ -529,6 +583,7 @@ impl UsbDevice {
                 })
                 .await?;
                 self.interfaces[interfaceNumber as usize] = Some(interface);
+                self.clear_endpoint_caches();
                 Ok(())
             }
             None => Err(napi::Error::from_reason(
@@ -542,6 +597,7 @@ impl UsbDevice {
         match &self.device {
             Some(_device) => match &self.interfaces[interfaceNumber as usize] {
                 Some(_interface) => {
+                    self.clear_endpoint_caches();
                     self.interfaces[interfaceNumber as usize] = None;
                     Ok(())
                 }
@@ -563,6 +619,7 @@ impl UsbDevice {
     ) -> Result<()> {
         match &self.interfaces[interfaceNumber as usize] {
             Some(interface) => {
+                self.clear_endpoint_caches();
                 let interface = interface.clone();
                 run_blocking(move || {
                     interface
@@ -669,9 +726,10 @@ impl UsbDevice {
         timeout: u32,
         length: u32,
     ) -> Result<Option<Uint8Array>> {
-        match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
-            Some(mut endpoint) => {
+        match self.get_in_endpoint(endpointNumber) {
+            Some(endpoint) => {
                 let v = run_blocking(move || {
+                    let mut endpoint = endpoint_guard(&endpoint);
                     let packet_size = endpoint.max_packet_size();
                     let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
                     let buf = Buffer::new(req);
@@ -702,10 +760,11 @@ impl UsbDevice {
         timeout: u32,
         data: Uint8Array,
     ) -> Result<u32> {
-        match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
-            Some(mut endpoint) => {
+        match self.get_out_endpoint(endpointNumber) {
+            Some(endpoint) => {
                 let data = data.to_vec();
                 run_blocking(move || {
+                    let mut endpoint = endpoint_guard(&endpoint);
                     let mut buf = Buffer::new(data.len());
                     buf.extend_from_slice(&data);
                     let completion =
@@ -763,9 +822,10 @@ impl UsbDevice {
         endpointNumber: u8,
     ) -> Result<()> {
         if direction == "in" {
-            match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
-                Some(mut endpoint) => {
+            match self.get_in_endpoint(endpointNumber) {
+                Some(endpoint) => {
                     run_blocking(move || {
+                        let mut endpoint = endpoint_guard(&endpoint);
                         endpoint
                             .clear_halt_blocking()
                             .map_err(|e| format!("clearHalt error: {e}"))
@@ -779,9 +839,10 @@ impl UsbDevice {
                 }
             }
         } else {
-            match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
-                Some(mut endpoint) => {
+            match self.get_out_endpoint(endpointNumber) {
+                Some(endpoint) => {
                     run_blocking(move || {
+                        let mut endpoint = endpoint_guard(&endpoint);
                         endpoint
                             .clear_halt_blocking()
                             .map_err(|e| format!("clearHalt error: {e}"))
@@ -797,6 +858,11 @@ impl UsbDevice {
         }
 
         Ok(())
+    }
+
+    fn clear_endpoint_caches(&self) {
+        self.in_endpoints.clear();
+        self.out_endpoints.clear();
     }
 
     #[napi]
@@ -878,7 +944,23 @@ impl UsbDevice {
         None
     }
 
-    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(
+    fn get_in_endpoint(
+        &self,
+        endpointNumber: u8,
+    ) -> Option<Arc<Mutex<AnyEndpoint<nusb::transfer::In>>>> {
+        self.in_endpoints
+            .get_or_try_insert_with(endpointNumber, || self.open_endpoint(endpointNumber))
+    }
+
+    fn get_out_endpoint(
+        &self,
+        endpointNumber: u8,
+    ) -> Option<Arc<Mutex<AnyEndpoint<nusb::transfer::Out>>>> {
+        self.out_endpoints
+            .get_or_try_insert_with(endpointNumber, || self.open_endpoint(endpointNumber))
+    }
+
+    fn open_endpoint<DIR: nusb::transfer::EndpointDirection>(
         &self,
         endpointNumber: u8,
     ) -> Option<AnyEndpoint<DIR>> {
