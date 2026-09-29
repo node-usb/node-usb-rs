@@ -4,7 +4,13 @@ use nusb::{
     descriptors::language_id::US_ENGLISH, descriptors::TransferType, transfer::Buffer,
     transfer::Bulk, transfer::Interrupt, MaybeFuture,
 };
-use std::time::Duration;
+use std::{
+    collections::{HashMap, VecDeque},
+    marker::PhantomData,
+    sync::{mpsc, Arc, Mutex, MutexGuard},
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
 const DESC_TIMEOUT: Duration = Duration::from_millis(100);
@@ -99,6 +105,54 @@ enum AnyEndpoint<DIR: nusb::transfer::EndpointDirection> {
     Interrupt(nusb::Endpoint<nusb::transfer::Interrupt, DIR>),
 }
 
+struct SharedEndpointCache<T> {
+    endpoints: Mutex<HashMap<u8, T>>,
+}
+
+impl<T> SharedEndpointCache<T> {
+    fn new() -> Self {
+        Self {
+            endpoints: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn guard(&self) -> MutexGuard<'_, HashMap<u8, T>> {
+        self.endpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+impl<DIR: nusb::transfer::EndpointDirection + 'static> SharedEndpointCache<EndpointWorker<DIR>> {
+    fn clear(&self) {
+        let workers = {
+            let mut endpoints = self.guard();
+            endpoints
+                .drain()
+                .map(|(_, worker)| worker)
+                .collect::<Vec<_>>()
+        };
+
+        for worker in workers {
+            worker.stop();
+        }
+    }
+
+    fn get_or_try_insert_with<F>(&self, endpointNumber: u8, open: F) -> Option<EndpointWorker<DIR>>
+    where
+        F: FnOnce() -> Option<AnyEndpoint<DIR>>,
+    {
+        let mut endpoints = self.guard();
+        if let Some(endpoint) = endpoints.get(&endpointNumber) {
+            return Some(endpoint.clone());
+        }
+
+        let worker = EndpointWorker::new(open()?);
+        endpoints.insert(endpointNumber, worker.clone());
+        Some(worker)
+    }
+}
+
 impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
     fn max_packet_size(&self) -> usize {
         match self {
@@ -107,14 +161,31 @@ impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
         }
     }
 
-    fn transfer_blocking(
-        &mut self,
-        buf: nusb::transfer::Buffer,
-        timeout: Duration,
-    ) -> nusb::transfer::Completion {
+    fn submit(&mut self, buf: nusb::transfer::Buffer) {
         match self {
-            AnyEndpoint::Bulk(ep) => ep.transfer_blocking(buf, timeout),
-            AnyEndpoint::Interrupt(ep) => ep.transfer_blocking(buf, timeout),
+            AnyEndpoint::Bulk(ep) => ep.submit(buf),
+            AnyEndpoint::Interrupt(ep) => ep.submit(buf),
+        }
+    }
+
+    fn pending(&self) -> usize {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.pending(),
+            AnyEndpoint::Interrupt(ep) => ep.pending(),
+        }
+    }
+
+    fn wait_next_complete(&mut self, timeout: Duration) -> Option<nusb::transfer::Completion> {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.wait_next_complete(timeout),
+            AnyEndpoint::Interrupt(ep) => ep.wait_next_complete(timeout),
+        }
+    }
+
+    fn cancel_all(&mut self) {
+        match self {
+            AnyEndpoint::Bulk(ep) => ep.cancel_all(),
+            AnyEndpoint::Interrupt(ep) => ep.cancel_all(),
         }
     }
 
@@ -124,6 +195,249 @@ impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
             AnyEndpoint::Interrupt(ep) => ep.clear_halt().wait(),
         }
     }
+}
+
+type TransferResponse = mpsc::Sender<std::result::Result<nusb::transfer::Completion, String>>;
+type ClearHaltResponse = mpsc::Sender<std::result::Result<(), String>>;
+
+enum EndpointCommand {
+    Transfer {
+        buffer: Buffer,
+        timeout: Duration,
+        response: TransferResponse,
+    },
+    ClearHalt {
+        response: ClearHaltResponse,
+    },
+    Stop,
+}
+
+struct PendingTransfer {
+    deadline: Instant,
+    response: Option<TransferResponse>,
+}
+
+struct EndpointWorker<DIR: nusb::transfer::EndpointDirection> {
+    sender: mpsc::Sender<EndpointCommand>,
+    join_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    max_packet_size: usize,
+    _direction: PhantomData<DIR>,
+}
+
+impl<DIR: nusb::transfer::EndpointDirection> Clone for EndpointWorker<DIR> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            join_handle: self.join_handle.clone(),
+            max_packet_size: self.max_packet_size,
+            _direction: PhantomData,
+        }
+    }
+}
+
+impl<DIR: nusb::transfer::EndpointDirection + 'static> EndpointWorker<DIR> {
+    fn new(endpoint: AnyEndpoint<DIR>) -> Self {
+        const ENDPOINT_POLL_TIMEOUT: Duration = Duration::from_millis(10);
+
+        let max_packet_size = endpoint.max_packet_size();
+        let (sender, receiver) = mpsc::channel();
+        let join_handle = thread::spawn(move || {
+            let mut endpoint = endpoint;
+            let mut pending = VecDeque::new();
+            let mut clear_halt_responses: Vec<ClearHaltResponse> = Vec::new();
+            let mut stopping = false;
+
+            loop {
+                if pending.is_empty() && stopping {
+                    break;
+                }
+
+                if pending.is_empty() {
+                    match receiver.recv() {
+                        Ok(command) => handle_endpoint_command(
+                            command,
+                            &mut endpoint,
+                            &mut pending,
+                            &mut clear_halt_responses,
+                            &mut stopping,
+                        ),
+                        Err(_) => break,
+                    }
+                }
+
+                loop {
+                    match receiver.try_recv() {
+                        Ok(command) => handle_endpoint_command(
+                            command,
+                            &mut endpoint,
+                            &mut pending,
+                            &mut clear_halt_responses,
+                            &mut stopping,
+                        ),
+                        Err(mpsc::TryRecvError::Empty) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            stopping = true;
+                            break;
+                        }
+                    }
+                }
+
+                expire_timed_out_transfers(&mut pending);
+
+                if endpoint.pending() > 0 {
+                    if let Some(completion) = endpoint.wait_next_complete(next_wait(&pending)) {
+                        if let Some(mut pending_transfer) = pending.pop_front() {
+                            if let Some(response) = pending_transfer.response.take() {
+                                let _ = response.send(Ok(completion));
+                            }
+                        }
+                    }
+                } else if !clear_halt_responses.is_empty() {
+                    let result = endpoint.clear_halt_blocking().map_err(|e| format!("{e}"));
+                    for response in clear_halt_responses.drain(..) {
+                        let _ = response.send(result.clone());
+                    }
+                } else if !pending.is_empty() {
+                    thread::sleep(ENDPOINT_POLL_TIMEOUT);
+                }
+            }
+        });
+
+        Self {
+            sender,
+            join_handle: Arc::new(Mutex::new(Some(join_handle))),
+            max_packet_size,
+            _direction: PhantomData,
+        }
+    }
+
+    async fn transfer(
+        &self,
+        buffer: Buffer,
+        timeout: Duration,
+    ) -> Result<nusb::transfer::Completion> {
+        let (response, receiver) = mpsc::channel();
+        self.sender
+            .send(EndpointCommand::Transfer {
+                buffer,
+                timeout,
+                response,
+            })
+            .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
+
+        run_blocking(move || match receiver.recv() {
+            Ok(Ok(completion)) => Ok(completion),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(format!("endpoint worker error: {e}")),
+        })
+        .await
+    }
+
+    async fn clear_halt(&self) -> Result<()> {
+        let (response, receiver) = mpsc::channel();
+        self.sender
+            .send(EndpointCommand::ClearHalt { response })
+            .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
+
+        run_blocking(move || match receiver.recv() {
+            Ok(result) => result,
+            Err(e) => Err(format!("endpoint worker error: {e}")),
+        })
+        .await
+    }
+
+    fn stop(&self) {
+        let _ = self.sender.send(EndpointCommand::Stop);
+        if let Some(join_handle) = self
+            .join_handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+fn handle_endpoint_command<DIR: nusb::transfer::EndpointDirection>(
+    command: EndpointCommand,
+    endpoint: &mut AnyEndpoint<DIR>,
+    pending: &mut VecDeque<PendingTransfer>,
+    clear_halt_responses: &mut Vec<ClearHaltResponse>,
+    stopping: &mut bool,
+) {
+    match command {
+        EndpointCommand::Transfer {
+            buffer,
+            timeout,
+            response,
+        } => {
+            if *stopping {
+                let _ = response.send(Err("endpoint worker stopped".to_string()));
+                return;
+            }
+
+            endpoint.submit(buffer);
+            pending.push_back(PendingTransfer {
+                deadline: Instant::now() + timeout,
+                response: Some(response),
+            });
+        }
+        EndpointCommand::ClearHalt { response } => {
+            endpoint.cancel_all();
+            cancel_pending_transfers(pending);
+            clear_halt_responses.push(response);
+        }
+        EndpointCommand::Stop => {
+            *stopping = true;
+            endpoint.cancel_all();
+            cancel_pending_transfers(pending);
+            for response in clear_halt_responses.drain(..) {
+                let _ = response.send(Err("endpoint worker stopped".to_string()));
+            }
+        }
+    }
+}
+
+fn cancel_pending_transfers(pending: &mut VecDeque<PendingTransfer>) {
+    for pending_transfer in pending {
+        if let Some(response) = pending_transfer.response.take() {
+            let _ = response.send(Err(format!(
+                "{:?}",
+                nusb::transfer::TransferError::Cancelled
+            )));
+        }
+    }
+}
+
+fn expire_timed_out_transfers(pending: &mut VecDeque<PendingTransfer>) {
+    let now = Instant::now();
+    for pending_transfer in pending {
+        if pending_transfer.deadline <= now {
+            if let Some(response) = pending_transfer.response.take() {
+                let _ = response.send(Err(format!(
+                    "{:?}",
+                    nusb::transfer::TransferError::Cancelled
+                )));
+            }
+        }
+    }
+}
+
+fn next_wait(pending: &VecDeque<PendingTransfer>) -> Duration {
+    const ENDPOINT_POLL_TIMEOUT: Duration = Duration::from_millis(10);
+
+    pending
+        .iter()
+        .filter(|pending_transfer| pending_transfer.response.is_some())
+        .map(|pending_transfer| {
+            pending_transfer
+                .deadline
+                .saturating_duration_since(Instant::now())
+        })
+        .min()
+        .map(|timeout| timeout.min(ENDPOINT_POLL_TIMEOUT))
+        .unwrap_or(ENDPOINT_POLL_TIMEOUT)
 }
 
 #[napi(object)]
@@ -268,6 +582,8 @@ pub struct UsbDevice {
     device_info: nusb::DeviceInfo,
     device: Option<nusb::Device>,
     interfaces: Vec<Option<nusb::Interface>>,
+    in_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::In>>,
+    out_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::Out>>,
 
     #[napi(writable = false)]
     pub vendorId: u16,
@@ -315,6 +631,8 @@ impl UsbDevice {
             device_info: device_info.clone(),
             device: None,
             interfaces: vec![None; 256],
+            in_endpoints: SharedEndpointCache::new(),
+            out_endpoints: SharedEndpointCache::new(),
             vendorId: device_info.vendor_id(),
             productId: device_info.product_id(),
             deviceVersionMajor,
@@ -440,6 +758,7 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn open(&mut self) -> Result<()> {
+        self.clear_endpoint_caches();
         let device_info = self.device_info.clone();
         let device = run_blocking(move || {
             device_info
@@ -454,6 +773,7 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn close(&mut self) -> Result<()> {
+        self.clear_endpoint_caches();
         self.device = None;
         Ok(())
     }
@@ -467,6 +787,7 @@ impl UsbDevice {
     pub async fn reset(&self) -> Result<()> {
         match &self.device {
             Some(device) => {
+                self.clear_endpoint_caches();
                 let device = device.clone();
                 run_blocking(move || {
                     device
@@ -474,7 +795,9 @@ impl UsbDevice {
                         .wait()
                         .map_err(|e| format!("reset error: {e}"))
                 })
-                .await
+                .await?;
+                self.clear_endpoint_caches();
+                Ok(())
             }
             None => Err(napi::Error::from_reason("reset error: invalid state")),
         }
@@ -500,6 +823,7 @@ impl UsbDevice {
                 }
                 #[cfg(not(windows))]
                 {
+                    self.clear_endpoint_caches();
                     let device = device.clone();
                     run_blocking(move || {
                         device
@@ -507,7 +831,9 @@ impl UsbDevice {
                             .wait()
                             .map_err(|e| format!("selectConfiguration error: {e}"))
                     })
-                    .await
+                    .await?;
+                    self.clear_endpoint_caches();
+                    Ok(())
                 }
             }
             None => Err(napi::Error::from_reason(
@@ -542,6 +868,7 @@ impl UsbDevice {
         match &self.device {
             Some(_device) => match &self.interfaces[interfaceNumber as usize] {
                 Some(_interface) => {
+                    self.clear_endpoint_caches();
                     self.interfaces[interfaceNumber as usize] = None;
                     Ok(())
                 }
@@ -563,6 +890,7 @@ impl UsbDevice {
     ) -> Result<()> {
         match &self.interfaces[interfaceNumber as usize] {
             Some(interface) => {
+                self.clear_endpoint_caches();
                 let interface = interface.clone();
                 run_blocking(move || {
                     interface
@@ -669,22 +997,18 @@ impl UsbDevice {
         timeout: u32,
         length: u32,
     ) -> Result<Option<Uint8Array>> {
-        match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
-            Some(mut endpoint) => {
-                let v = run_blocking(move || {
-                    let packet_size = endpoint.max_packet_size();
-                    let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
-                    let buf = Buffer::new(req);
-                    let completion =
-                        endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                    completion
-                        .status
-                        .map_err(|e| format!("transferIn error: {e:?}"))?;
-                    let mut v = completion.buffer.into_vec();
-                    v.truncate(completion.actual_len.min(length as usize));
-                    Ok(v)
-                })
-                .await?;
+        match self.get_in_endpoint(endpointNumber) {
+            Some(worker) => {
+                let packet_size = worker.max_packet_size;
+                let req = (((length as usize) + packet_size - 1) / packet_size) * packet_size;
+                let completion = worker
+                    .transfer(Buffer::new(req), Duration::from_millis(timeout as u64))
+                    .await?;
+                completion
+                    .status
+                    .map_err(|e| napi::Error::from_reason(format!("transferIn error: {e:?}")))?;
+                let mut v = completion.buffer.into_vec();
+                v.truncate(completion.actual_len.min(length as usize));
                 Ok(Some(Uint8Array::from(v)))
             }
             None => {
@@ -702,20 +1026,18 @@ impl UsbDevice {
         timeout: u32,
         data: Uint8Array,
     ) -> Result<u32> {
-        match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
-            Some(mut endpoint) => {
+        match self.get_out_endpoint(endpointNumber) {
+            Some(worker) => {
                 let data = data.to_vec();
-                run_blocking(move || {
-                    let mut buf = Buffer::new(data.len());
-                    buf.extend_from_slice(&data);
-                    let completion =
-                        endpoint.transfer_blocking(buf, Duration::from_millis(timeout as u64));
-                    completion
-                        .status
-                        .map_err(|e| format!("transferOut error: {e:?}"))?;
-                    Ok(completion.actual_len as u32)
-                })
-                .await
+                let mut buf = Buffer::new(data.len());
+                buf.extend_from_slice(&data);
+                let completion = worker
+                    .transfer(buf, Duration::from_millis(timeout as u64))
+                    .await?;
+                completion
+                    .status
+                    .map_err(|e| napi::Error::from_reason(format!("transferOut error: {e:?}")))?;
+                Ok(completion.actual_len as u32)
             }
             None => {
                 return Err(napi::Error::from_reason(
@@ -763,14 +1085,12 @@ impl UsbDevice {
         endpointNumber: u8,
     ) -> Result<()> {
         if direction == "in" {
-            match self.get_endpoint::<nusb::transfer::In>(endpointNumber) {
-                Some(mut endpoint) => {
-                    run_blocking(move || {
-                        endpoint
-                            .clear_halt_blocking()
-                            .map_err(|e| format!("clearHalt error: {e}"))
-                    })
-                    .await?;
+            match self.get_in_endpoint(endpointNumber) {
+                Some(worker) => {
+                    worker
+                        .clear_halt()
+                        .await
+                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
                 }
                 None => {
                     return Err(napi::Error::from_reason(
@@ -779,14 +1099,12 @@ impl UsbDevice {
                 }
             }
         } else {
-            match self.get_endpoint::<nusb::transfer::Out>(endpointNumber) {
-                Some(mut endpoint) => {
-                    run_blocking(move || {
-                        endpoint
-                            .clear_halt_blocking()
-                            .map_err(|e| format!("clearHalt error: {e}"))
-                    })
-                    .await?;
+            match self.get_out_endpoint(endpointNumber) {
+                Some(worker) => {
+                    worker
+                        .clear_halt()
+                        .await
+                        .map_err(|e| napi::Error::from_reason(format!("clearHalt error: {e}")))?;
                 }
                 None => {
                     return Err(napi::Error::from_reason(
@@ -797,6 +1115,11 @@ impl UsbDevice {
         }
 
         Ok(())
+    }
+
+    fn clear_endpoint_caches(&self) {
+        self.in_endpoints.clear();
+        self.out_endpoints.clear();
     }
 
     #[napi]
@@ -878,7 +1201,17 @@ impl UsbDevice {
         None
     }
 
-    fn get_endpoint<DIR: nusb::transfer::EndpointDirection>(
+    fn get_in_endpoint(&self, endpointNumber: u8) -> Option<EndpointWorker<nusb::transfer::In>> {
+        self.in_endpoints
+            .get_or_try_insert_with(endpointNumber, || self.open_endpoint(endpointNumber))
+    }
+
+    fn get_out_endpoint(&self, endpointNumber: u8) -> Option<EndpointWorker<nusb::transfer::Out>> {
+        self.out_endpoints
+            .get_or_try_insert_with(endpointNumber, || self.open_endpoint(endpointNumber))
+    }
+
+    fn open_endpoint<DIR: nusb::transfer::EndpointDirection>(
         &self,
         endpointNumber: u8,
     ) -> Option<AnyEndpoint<DIR>> {
