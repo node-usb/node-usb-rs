@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.2.0] - 2026-10-04
+## [3.2.1] - 2026-10-04
 
 ### Changed
 - Updated napi to v3.13.0 - [`75`](https://github.com/node-usb/node-usb-rs/pull/75) ([Rob Moran](https://github.com/thegecko))
