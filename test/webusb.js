@@ -304,6 +304,30 @@ describe('Transfers', () => {
         await device.claimInterface(0);
     });
 
+    it('does not cancel transfer IN by default', async () => {
+        const pending = { status: 'pending' };
+        const transfer = device.transferIn(3, b2.byteLength).then(
+            value => ({ status: 'fulfilled', value }),
+            reason => ({ status: 'rejected', reason })
+        );
+
+        const result = await Promise.race([
+            transfer,
+            new Promise(resolve => setTimeout(() => resolve(pending), 1200)),
+        ]);
+
+        assert.notEqual(result.status, 'rejected', result.reason && result.reason.message);
+
+        if (result.status === 'pending') {
+            await device.transferOut(4, b2);
+            const completed = await transfer;
+
+            assert.equal(completed.status, 'fulfilled', completed.reason && completed.reason.message);
+            assert.equal(completed.value.status, 'ok');
+            assert.equal(completed.value.data.byteLength, b2.byteLength);
+        }
+    });
+
     it('should transfer OUT', async () => {
         const transferResult = await device.transferOut(4, b2);
 

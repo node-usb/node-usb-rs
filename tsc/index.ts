@@ -3,7 +3,9 @@ import { nativeGetDevices, nativeFindDeviceByIds, nativeFindDeviceBySerial, UsbD
 /**
  * Hidden
  */
-const DEFAULT_TIMEOUT = 1000;
+const DEFAULT_TRANSFER_TIMEOUT = 0;
+const DEFAULT_CONTROL_TRANSFER_TIMEOUT = 1000;
+const DEFAULT_ISOCHRONOUS_TRANSFER_TIMEOUT = 1000;
 
 /**
  * Hidden
@@ -24,7 +26,7 @@ const toUint8Array = (data: BufferSource): Uint8Array => {
 /**
  * Hidden
  */
-UsbDevice.prototype.controlTransferIn = async function (setup: USBControlTransferParameters, length: number, timeout = DEFAULT_TIMEOUT): Promise<USBInTransferResult> {
+UsbDevice.prototype.controlTransferIn = async function (setup: USBControlTransferParameters, length: number, timeout = DEFAULT_CONTROL_TRANSFER_TIMEOUT): Promise<USBInTransferResult> {
     const res = await this.nativeControlTransferIn(setup, timeout, length);
     return {
         data: res ? new DataView(res.buffer) : undefined,
@@ -35,7 +37,7 @@ UsbDevice.prototype.controlTransferIn = async function (setup: USBControlTransfe
 /**
  * Hidden
  */
-UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransferParameters, data: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
+UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransferParameters, data: BufferSource, timeout = DEFAULT_CONTROL_TRANSFER_TIMEOUT): Promise<USBOutTransferResult> {
     const res = await this.nativeControlTransferOut(setup, timeout, toUint8Array(data));
     return {
         bytesWritten: res,
@@ -46,7 +48,7 @@ UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransf
 /**
  * Hidden
  */
-UsbDevice.prototype.transferIn = async function (endpointNumber: number, length: number, timeout = DEFAULT_TIMEOUT): Promise<USBInTransferResult> {
+UsbDevice.prototype.transferIn = async function (endpointNumber: number, length: number, timeout = DEFAULT_TRANSFER_TIMEOUT): Promise<USBInTransferResult> {
     const res = await this.nativeTransferIn(endpointNumber, timeout, length);
     return {
         data: res ? new DataView(res.buffer) : undefined,
@@ -57,7 +59,7 @@ UsbDevice.prototype.transferIn = async function (endpointNumber: number, length:
 /**
  * Hidden
  */
-UsbDevice.prototype.transferOut = async function (endpointNumber: number, data: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
+UsbDevice.prototype.transferOut = async function (endpointNumber: number, data: BufferSource, timeout = DEFAULT_TRANSFER_TIMEOUT): Promise<USBOutTransferResult> {
     const res = await this.nativeTransferOut(endpointNumber, timeout, toUint8Array(data));
     return {
         bytesWritten: res,
@@ -68,7 +70,7 @@ UsbDevice.prototype.transferOut = async function (endpointNumber: number, data: 
 /**
  * Hidden
  */
-UsbDevice.prototype.isochronousTransferIn = async function (endpointNumber: number, packetLengths: number[], timeout = DEFAULT_TIMEOUT): Promise<USBIsochronousInTransferResult> {
+UsbDevice.prototype.isochronousTransferIn = async function (endpointNumber: number, packetLengths: number[], timeout = DEFAULT_ISOCHRONOUS_TRANSFER_TIMEOUT): Promise<USBIsochronousInTransferResult> {
     const res = await this.nativeIsochronousTransferIn(endpointNumber, packetLengths, timeout);
     return res;
 }
@@ -76,7 +78,7 @@ UsbDevice.prototype.isochronousTransferIn = async function (endpointNumber: numb
 /**
  * Hidden
  */
-UsbDevice.prototype.isochronousTransferOut = async function (endpointNumber: number, data: BufferSource, packetLengths: number[], timeout = DEFAULT_TIMEOUT): Promise<USBIsochronousOutTransferResult> {
+UsbDevice.prototype.isochronousTransferOut = async function (endpointNumber: number, data: BufferSource, packetLengths: number[], timeout = DEFAULT_ISOCHRONOUS_TRANSFER_TIMEOUT): Promise<USBIsochronousOutTransferResult> {
     const res = await this.nativeIsochronousTransferOut(endpointNumber, toUint8Array(data), packetLengths, timeout);
     return res;
 }
