@@ -35,8 +35,8 @@ UsbDevice.prototype.controlTransferIn = async function (setup: USBControlTransfe
 /**
  * Hidden
  */
-UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransferParameters, data: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
-    const res = await this.nativeControlTransferOut(setup, timeout, toUint8Array(data));
+UsbDevice.prototype.controlTransferOut = async function (setup: USBControlTransferParameters, data?: BufferSource, timeout = DEFAULT_TIMEOUT): Promise<USBOutTransferResult> {
+    const res = await this.nativeControlTransferOut(setup, timeout, data === undefined ? undefined : toUint8Array(data));
     return {
         bytesWritten: res,
         status: res >= 0 ? 'ok' : 'stall',
