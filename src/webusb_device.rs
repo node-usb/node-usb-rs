@@ -668,53 +668,26 @@ impl UsbDevice {
 
     #[napi(getter)]
     pub unsafe fn manufacturerName(&mut self) -> Result<Option<String>> {
-        match &self.device_info.manufacturer_string() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(
-                    &device,
-                    device.device_descriptor().manufacturer_string_index(),
-                )
-            }
-        }
+        self.device_info
+            .get_manufacturer_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
     pub unsafe fn productName(&mut self) -> Result<Option<String>> {
-        match &self.device_info.product_string() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(&device, device.device_descriptor().product_string_index())
-            }
-        }
+        self.device_info
+            .get_product_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
     pub unsafe fn serialNumber(&mut self) -> Result<Option<String>> {
-        match &self.device_info.serial_number() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(
-                    &device,
-                    device.device_descriptor().serial_number_string_index(),
-                )
-            }
-        }
+        self.device_info
+            .get_serial_number_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
