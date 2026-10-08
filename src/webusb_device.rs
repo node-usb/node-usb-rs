@@ -213,7 +213,7 @@ enum EndpointCommand {
 }
 
 struct PendingTransfer {
-    deadline: Instant,
+    deadline: Option<Instant>,
     response: Option<TransferResponse>,
 }
 
@@ -379,7 +379,7 @@ fn handle_endpoint_command<DIR: nusb::transfer::EndpointDirection>(
 
             endpoint.submit(buffer);
             pending.push_back(PendingTransfer {
-                deadline: Instant::now() + timeout,
+                deadline: transfer_deadline(timeout),
                 response: Some(response),
             });
         }
@@ -413,7 +413,10 @@ fn cancel_pending_transfers(pending: &mut VecDeque<PendingTransfer>) {
 fn expire_timed_out_transfers(pending: &mut VecDeque<PendingTransfer>) {
     let now = Instant::now();
     for pending_transfer in pending {
-        if pending_transfer.deadline <= now {
+        if pending_transfer
+            .deadline
+            .is_some_and(|deadline| deadline <= now)
+        {
             if let Some(response) = pending_transfer.response.take() {
                 let _ = response.send(Err(format!(
                     "{:?}",
@@ -430,14 +433,19 @@ fn next_wait(pending: &VecDeque<PendingTransfer>) -> Duration {
     pending
         .iter()
         .filter(|pending_transfer| pending_transfer.response.is_some())
-        .map(|pending_transfer| {
-            pending_transfer
-                .deadline
-                .saturating_duration_since(Instant::now())
-        })
+        .filter_map(|pending_transfer| pending_transfer.deadline)
+        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
         .min()
         .map(|timeout| timeout.min(ENDPOINT_POLL_TIMEOUT))
         .unwrap_or(ENDPOINT_POLL_TIMEOUT)
+}
+
+fn transfer_deadline(timeout: Duration) -> Option<Instant> {
+    if timeout.is_zero() {
+        None
+    } else {
+        Some(Instant::now() + timeout)
+    }
 }
 
 #[napi(object)]
