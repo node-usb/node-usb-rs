@@ -11,6 +11,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+use tokio::sync::oneshot;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
 const DESC_TIMEOUT: Duration = Duration::from_millis(100);
@@ -197,8 +198,8 @@ impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
     }
 }
 
-type TransferResponse = mpsc::Sender<std::result::Result<nusb::transfer::Completion, String>>;
-type ClearHaltResponse = mpsc::Sender<std::result::Result<(), String>>;
+type TransferResponse = oneshot::Sender<std::result::Result<nusb::transfer::Completion, String>>;
+type ClearHaltResponse = oneshot::Sender<std::result::Result<(), String>>;
 
 enum EndpointCommand {
     Transfer {
@@ -316,7 +317,7 @@ impl<DIR: nusb::transfer::EndpointDirection + 'static> EndpointWorker<DIR> {
         buffer: Buffer,
         timeout: Duration,
     ) -> Result<nusb::transfer::Completion> {
-        let (response, receiver) = mpsc::channel();
+        let (response, receiver) = oneshot::channel();
         self.sender
             .send(EndpointCommand::Transfer {
                 buffer,
@@ -325,25 +326,28 @@ impl<DIR: nusb::transfer::EndpointDirection + 'static> EndpointWorker<DIR> {
             })
             .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
 
-        run_blocking(move || match receiver.recv() {
+        match receiver.await {
             Ok(Ok(completion)) => Ok(completion),
-            Ok(Err(e)) => Err(e),
-            Err(e) => Err(format!("endpoint worker error: {e}")),
-        })
-        .await
+            Ok(Err(e)) => Err(napi::Error::from_reason(e)),
+            Err(e) => Err(napi::Error::from_reason(format!(
+                "endpoint worker error: {e}"
+            ))),
+        }
     }
 
     async fn clear_halt(&self) -> Result<()> {
-        let (response, receiver) = mpsc::channel();
+        let (response, receiver) = oneshot::channel();
         self.sender
             .send(EndpointCommand::ClearHalt { response })
             .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
 
-        run_blocking(move || match receiver.recv() {
-            Ok(result) => result,
-            Err(e) => Err(format!("endpoint worker error: {e}")),
-        })
-        .await
+        match receiver.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(napi::Error::from_reason(e)),
+            Err(e) => Err(napi::Error::from_reason(format!(
+                "endpoint worker error: {e}"
+            ))),
+        }
     }
 
     fn stop(&self) {
