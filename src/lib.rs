@@ -163,12 +163,20 @@ impl Drop for Emitter {
     }
 }
 
+// A Linux machine without a USB bus (often a container) has no
+// /sys/bus/usb/devices. That means there are no devices, not that listing failed.
+fn is_missing_usb_bus(e: &nusb::Error) -> bool {
+    cfg!(target_os = "linux")
+        && e.os_error().is_some_and(|code| {
+            std::io::Error::from_raw_os_error(code as i32).kind() == std::io::ErrorKind::NotFound
+        })
+}
+
 async fn list_devices(error_prefix: &'static str) -> Result<Vec<nusb::DeviceInfo>> {
-    run_blocking(move || {
-        nusb::list_devices()
-            .wait()
-            .map(|devices| devices.collect::<Vec<_>>())
-            .map_err(|e| format!("{error_prefix} error: {e}"))
+    run_blocking(move || match nusb::list_devices().wait() {
+        Ok(devices) => Ok(devices.collect::<Vec<_>>()),
+        Err(e) if is_missing_usb_bus(&e) => Ok(Vec::new()),
+        Err(e) => Err(format!("{error_prefix} error: {e}")),
     })
     .await
 }

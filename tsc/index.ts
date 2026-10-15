@@ -148,7 +148,9 @@ class WebUSB extends EventTarget implements USB {
     private queueNativeEmitterOperation(operation: () => Promise<void>): void {
         const pending = this.nativeEmitterQueue.then(operation);
         this.nativeEmitterQueue = pending.catch(() => {});
-        pending.catch(error => setTimeout(() => { throw error; }, 0));
+        // A hotplug watcher that can't start (e.g. no netlink in a container) must
+        // not crash the host process, so report it rather than rethrowing.
+        pending.catch(error => console.warn('usb: hotplug watcher error:', error));
     }
 
     private deviceConnectCallback = async (device: UsbDevice) => {
@@ -194,7 +196,9 @@ class WebUSB extends EventTarget implements USB {
                 await this.nativeEmitter.addAttach(this.deviceConnectCallback);
                 await this.nativeEmitter.addDetach(this.deviceDisconnectCallback);
             });
-            nativeGetDevices().then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)));
+            nativeGetDevices()
+                .then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)))
+                .catch(error => console.warn('usb: failed to list devices for hotplug:', error));
         }
     }
 
