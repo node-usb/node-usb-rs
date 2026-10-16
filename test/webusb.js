@@ -270,6 +270,19 @@ describe('Control Transfers', () => {
         assert.equal(transferResult.bytesWritten, b1.byteLength);
     });
 
+    it('should control transfer OUT without data', async () => {
+        const transferResult = await device.controlTransferOut({
+            requestType: 'vendor',
+            recipient: 'device',
+            request: 0x81,
+            value: 0,
+            index: 0
+        });
+
+        assert.equal(transferResult.status, 'ok');
+        assert.equal(transferResult.bytesWritten, 0);
+    });
+
     it('should control transfer IN', async () => {
         const transferResult = await device.controlTransferIn({
             requestType: 'vendor',
