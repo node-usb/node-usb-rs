@@ -359,6 +359,32 @@ describe('Transfers', () => {
     });
 });
 
+describe('Active Transfer Cleanup', () => {
+    const openClaimedDevice = async () => {
+        const device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
+        await device.open();
+        await device.claimInterface(0);
+        return device;
+    };
+
+    it('should close while transfer IN is active', async () => {
+        const device = await openClaimedDevice();
+        const transfer = device.transferIn(3, 64, 60000);
+
+        await assert.doesNotReject(device.close());
+        await assert.rejects(transfer);
+    });
+
+    it('should release interface while transfer IN is active', async () => {
+        const device = await openClaimedDevice();
+        const transfer = device.transferIn(3, 64, 60000);
+
+        await assert.doesNotReject(device.releaseInterface(0));
+        await assert.rejects(transfer);
+        await device.close();
+    });
+});
+
 describe('Throwing Transfers', () => {
     let device = null;
 
