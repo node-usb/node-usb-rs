@@ -11,6 +11,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+use tokio::sync::oneshot;
 
 const ENDPOINT_NUMBER_MASK: u8 = 0x7f;
 const DESC_TIMEOUT: Duration = Duration::from_millis(100);
@@ -197,8 +198,8 @@ impl<DIR: nusb::transfer::EndpointDirection> AnyEndpoint<DIR> {
     }
 }
 
-type TransferResponse = mpsc::Sender<std::result::Result<nusb::transfer::Completion, String>>;
-type ClearHaltResponse = mpsc::Sender<std::result::Result<(), String>>;
+type TransferResponse = oneshot::Sender<std::result::Result<nusb::transfer::Completion, String>>;
+type ClearHaltResponse = oneshot::Sender<std::result::Result<(), String>>;
 
 enum EndpointCommand {
     Transfer {
@@ -316,7 +317,7 @@ impl<DIR: nusb::transfer::EndpointDirection + 'static> EndpointWorker<DIR> {
         buffer: Buffer,
         timeout: Duration,
     ) -> Result<nusb::transfer::Completion> {
-        let (response, receiver) = mpsc::channel();
+        let (response, receiver) = oneshot::channel();
         self.sender
             .send(EndpointCommand::Transfer {
                 buffer,
@@ -325,25 +326,28 @@ impl<DIR: nusb::transfer::EndpointDirection + 'static> EndpointWorker<DIR> {
             })
             .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
 
-        run_blocking(move || match receiver.recv() {
+        match receiver.await {
             Ok(Ok(completion)) => Ok(completion),
-            Ok(Err(e)) => Err(e),
-            Err(e) => Err(format!("endpoint worker error: {e}")),
-        })
-        .await
+            Ok(Err(e)) => Err(napi::Error::from_reason(e)),
+            Err(e) => Err(napi::Error::from_reason(format!(
+                "endpoint worker error: {e}"
+            ))),
+        }
     }
 
     async fn clear_halt(&self) -> Result<()> {
-        let (response, receiver) = mpsc::channel();
+        let (response, receiver) = oneshot::channel();
         self.sender
             .send(EndpointCommand::ClearHalt { response })
             .map_err(|_| napi::Error::from_reason("endpoint worker stopped"))?;
 
-        run_blocking(move || match receiver.recv() {
-            Ok(result) => result,
-            Err(e) => Err(format!("endpoint worker error: {e}")),
-        })
-        .await
+        match receiver.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(napi::Error::from_reason(e)),
+            Err(e) => Err(napi::Error::from_reason(format!(
+                "endpoint worker error: {e}"
+            ))),
+        }
     }
 
     fn stop(&self) {
@@ -535,7 +539,7 @@ impl UsbInterface {
     ) -> Result<Self> {
         Ok(Self {
             interfaceNumber: iface.interface_number(),
-            claimed: usb_device.interfaces[iface.interface_number() as usize].is_some(),
+            claimed: usb_device.interfaces_guard()[iface.interface_number() as usize].is_some(),
             alternate: UsbAlternateInterface::new(&device, iface.first_alt_setting())?,
             alternates: iface
                 .alt_settings()
@@ -588,8 +592,8 @@ pub struct UsbControlTransferParameters {
 #[napi]
 pub struct UsbDevice {
     device_info: nusb::DeviceInfo,
-    device: Option<nusb::Device>,
-    interfaces: Vec<Option<nusb::Interface>>,
+    device: Mutex<Option<nusb::Device>>,
+    interfaces: Mutex<Vec<Option<nusb::Interface>>>,
     in_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::In>>,
     out_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::Out>>,
 
@@ -629,6 +633,18 @@ pub struct UsbDevice {
 
 #[napi]
 impl UsbDevice {
+    fn device_guard(&self) -> MutexGuard<'_, Option<nusb::Device>> {
+        self.device
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn interfaces_guard(&self) -> MutexGuard<'_, Vec<Option<nusb::Interface>>> {
+        self.interfaces
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     pub fn new(device_info: nusb::DeviceInfo) -> Self {
         let (deviceVersionMajor, deviceVersionMinor, deviceVersionSubminor) =
             decode_version(device_info.device_version());
@@ -637,8 +653,8 @@ impl UsbDevice {
 
         Self {
             device_info: device_info.clone(),
-            device: None,
-            interfaces: vec![None; 256],
+            device: Mutex::new(None),
+            interfaces: Mutex::new(vec![None; 256]),
             in_endpoints: SharedEndpointCache::new(),
             out_endpoints: SharedEndpointCache::new(),
             vendorId: device_info.vendor_id(),
@@ -676,63 +692,36 @@ impl UsbDevice {
 
     #[napi(getter)]
     pub unsafe fn manufacturerName(&mut self) -> Result<Option<String>> {
-        match &self.device_info.manufacturer_string() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(
-                    &device,
-                    device.device_descriptor().manufacturer_string_index(),
-                )
-            }
-        }
+        self.device_info
+            .get_manufacturer_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
     pub unsafe fn productName(&mut self) -> Result<Option<String>> {
-        match &self.device_info.product_string() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(&device, device.device_descriptor().product_string_index())
-            }
-        }
+        self.device_info
+            .get_product_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
     pub unsafe fn serialNumber(&mut self) -> Result<Option<String>> {
-        match &self.device_info.serial_number() {
-            Some(str) => Ok(Some(str.to_string())),
-            None => {
-                let device = match self.device.as_ref() {
-                    Some(device) => device.clone(),
-                    None => self._open()?,
-                };
-
-                get_string(
-                    &device,
-                    device.device_descriptor().serial_number_string_index(),
-                )
-            }
-        }
+        self.device_info
+            .get_serial_number_string()
+            .wait()
+            .map_err(|e| napi::Error::from_reason(format!("getString error: {e}")))
     }
 
     #[napi(getter)]
     pub fn opened(&self) -> bool {
-        self.device.is_some()
+        self.device_guard().is_some()
     }
 
     #[napi(getter, ts_return_type = "USBConfiguration")]
     pub unsafe fn configuration(&mut self) -> Result<Option<UsbConfiguration>> {
-        let device = match self.device.as_ref() {
+        let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
         };
@@ -746,7 +735,7 @@ impl UsbDevice {
 
     #[napi(getter, ts_return_type = "Array<USBConfiguration>")]
     pub unsafe fn configurations(&mut self) -> Result<Vec<UsbConfiguration>> {
-        let device = match self.device.as_ref() {
+        let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
         };
@@ -757,7 +746,7 @@ impl UsbDevice {
             .collect::<Result<Vec<_>>>()
     }
 
-    unsafe fn _open(&mut self) -> Result<nusb::Device> {
+    unsafe fn _open(&self) -> Result<nusb::Device> {
         self.device_info
             .open()
             .wait()
@@ -775,28 +764,29 @@ impl UsbDevice {
                 .map_err(|e| format!("open error: {e}"))
         })
         .await?;
-        self.device = Some(device);
+        *self.device_guard() = Some(device);
         Ok(())
     }
 
     #[napi]
-    pub async unsafe fn close(&mut self) -> Result<()> {
+    pub async unsafe fn close(&self) -> Result<()> {
         self.clear_endpoint_caches();
-        self.device = None;
+        self.interfaces_guard().fill(None);
+        *self.device_guard() = None;
         Ok(())
     }
 
     #[napi]
-    pub async unsafe fn forget(&mut self) -> Result<()> {
+    pub async unsafe fn forget(&self) -> Result<()> {
         self.close().await
     }
 
     #[napi]
     pub async fn reset(&self) -> Result<()> {
-        match &self.device {
+        let device = self.device_guard().clone();
+        match device {
             Some(device) => {
                 self.clear_endpoint_caches();
-                let device = device.clone();
                 run_blocking(move || {
                     device
                         .reset()
@@ -813,7 +803,8 @@ impl UsbDevice {
 
     #[napi]
     pub async fn selectConfiguration(&self, configurationValue: u8) -> Result<()> {
-        match &self.device {
+        let device = self.device_guard().clone();
+        match device {
             Some(device) => {
                 let found = device
                     .configurations()
@@ -832,7 +823,6 @@ impl UsbDevice {
                 #[cfg(not(windows))]
                 {
                     self.clear_endpoint_caches();
-                    let device = device.clone();
                     run_blocking(move || {
                         device
                             .set_configuration(configurationValue)
@@ -852,9 +842,9 @@ impl UsbDevice {
 
     #[napi]
     pub async unsafe fn claimInterface(&mut self, interfaceNumber: u8) -> Result<()> {
-        match &self.device {
+        let device = self.device_guard().clone();
+        match device {
             Some(device) => {
-                let device = device.clone();
                 let interface = run_blocking(move || {
                     device
                         .claim_interface(interfaceNumber)
@@ -862,7 +852,7 @@ impl UsbDevice {
                         .map_err(|e| format!("claimInterface error: {e}"))
                 })
                 .await?;
-                self.interfaces[interfaceNumber as usize] = Some(interface);
+                self.interfaces_guard()[interfaceNumber as usize] = Some(interface);
                 Ok(())
             }
             None => Err(napi::Error::from_reason(
@@ -872,22 +862,22 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn releaseInterface(&mut self, interfaceNumber: u8) -> Result<()> {
-        match &self.device {
-            Some(_device) => match &self.interfaces[interfaceNumber as usize] {
-                Some(_interface) => {
-                    self.clear_endpoint_caches();
-                    self.interfaces[interfaceNumber as usize] = None;
-                    Ok(())
-                }
-                None => Err(napi::Error::from_reason(
-                    "releaseInterface error: not claimed",
-                )),
-            },
-            None => Err(napi::Error::from_reason(
+    pub async unsafe fn releaseInterface(&self, interfaceNumber: u8) -> Result<()> {
+        if self.device_guard().is_none() {
+            return Err(napi::Error::from_reason(
                 "releaseInterface error: invalid state",
-            )),
+            ));
         }
+
+        if self.interfaces_guard()[interfaceNumber as usize].is_none() {
+            return Err(napi::Error::from_reason(
+                "releaseInterface error: not claimed",
+            ));
+        }
+
+        self.clear_endpoint_caches();
+        self.interfaces_guard()[interfaceNumber as usize] = None;
+        Ok(())
     }
 
     #[napi]
@@ -896,10 +886,10 @@ impl UsbDevice {
         interfaceNumber: u8,
         alternateSetting: u8,
     ) -> Result<()> {
-        match &self.interfaces[interfaceNumber as usize] {
+        let interface = self.interfaces_guard()[interfaceNumber as usize].clone();
+        match interface {
             Some(interface) => {
                 self.clear_endpoint_caches();
-                let interface = interface.clone();
                 run_blocking(move || {
                     interface
                         .set_alt_setting(alternateSetting)
@@ -927,7 +917,7 @@ impl UsbDevice {
 
         #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
-            let device = self.device.as_ref().cloned().ok_or_else(|| {
+            let device = self.device_guard().as_ref().cloned().ok_or_else(|| {
                 napi::Error::from_reason(format!("controlTransferIn error: invalid state"))
             })?;
             let request = control_in_setup(&setup, control_type, recipient, setup.index, length);
@@ -969,7 +959,7 @@ impl UsbDevice {
 
         #[cfg(not(windows))]
         if recipient == nusb::transfer::Recipient::Device {
-            let device = self.device.as_ref().cloned().ok_or_else(|| {
+            let device = self.device_guard().as_ref().cloned().ok_or_else(|| {
                 napi::Error::from_reason(format!("controlTransferOut error: invalid state"))
             })?;
             run_blocking(move || {
@@ -1132,9 +1122,9 @@ impl UsbDevice {
 
     #[napi]
     pub async fn detachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
-        match &self.device {
+        let device = self.device_guard().clone();
+        match device {
             Some(device) => {
-                let device = device.clone();
                 run_blocking(move || {
                     device
                         .detach_kernel_driver(interfaceNumber)
@@ -1150,9 +1140,9 @@ impl UsbDevice {
 
     #[napi]
     pub async fn attachKernelDriver(&self, interfaceNumber: u8) -> Result<()> {
-        match &self.device {
+        let device = self.device_guard().clone();
+        match device {
             Some(device) => {
-                let device = device.clone();
                 run_blocking(move || {
                     device
                         .attach_kernel_driver(interfaceNumber)
@@ -1174,7 +1164,7 @@ impl UsbDevice {
         if recipient == nusb::transfer::Recipient::Interface {
             // If recipient is interface and index matches a claimed interface number use that interface
             if let Some(interface) = self
-                .interfaces
+                .interfaces_guard()
                 .get(index as usize)
                 .and_then(|interface| interface.clone())
             {
@@ -1183,7 +1173,7 @@ impl UsbDevice {
         }
         if recipient == nusb::transfer::Recipient::Endpoint {
             // If recipient is endpoint and index matches an endpoint address use the interface that owns that endpoint
-            for maybe_iface in &self.interfaces {
+            for maybe_iface in self.interfaces_guard().iter() {
                 let iface = match maybe_iface {
                     Some(i) => i,
                     None => continue,
@@ -1202,7 +1192,7 @@ impl UsbDevice {
         }
 
         // Return any claimed interface (e.g. for device control transfers on Windows)
-        let maybe_iface = self.interfaces.iter().find_map(|x| x.clone());
+        let maybe_iface = self.interfaces_guard().iter().find_map(|x| x.clone());
         if maybe_iface.is_some() {
             return maybe_iface;
         }
@@ -1223,7 +1213,7 @@ impl UsbDevice {
         &self,
         endpointNumber: u8,
     ) -> Option<AnyEndpoint<DIR>> {
-        for maybe_iface in &self.interfaces {
+        for maybe_iface in self.interfaces_guard().iter() {
             let iface = match maybe_iface {
                 Some(i) => i,
                 None => continue,

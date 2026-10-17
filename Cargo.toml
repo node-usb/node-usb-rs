@@ -12,8 +12,8 @@ crate-type = ["cdylib"]
 futures-lite = "2.6.1"
 napi = { version = "3.9.0", features = ["tokio_rt"] }
 napi-derive = "3.5.6"
-nusb = "=0.2.7"
-tokio = { version = "1.52.3", features = ["rt", "time", "fs", "macros"] }
+nusb = "=0.2.8"
+tokio = { version = "1.52.3", features = ["rt", "time", "fs", "macros", "sync"] }
 
 [build-dependencies]
 napi-build = "2.3.2"
