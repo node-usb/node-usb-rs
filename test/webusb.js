@@ -8,6 +8,23 @@ if (typeof gc === 'function') {
     afterEach(() => gc());
 }
 
+function createFakeDevice({ vendorId, productId, serialNumber, serialError }) {
+    return {
+        vendorId,
+        productId,
+        deviceClass: 0,
+        deviceSubclass: 0,
+        deviceProtocol: 0,
+        get serialNumber() {
+            if (serialError) {
+                throw serialError;
+            }
+
+            return serialNumber || null;
+        },
+    };
+}
+
 describe('usb Module', () => {
     it('should getDevices', async () => {
         const devs = await usb.getDevices();
@@ -49,6 +66,26 @@ describe('requestDevice', () => {
     it('should return a device', async () => {
         const device = await webusb.requestDevice({ filters: [{ vendorId: 0x59e3 }] });
         assert.notEqual(device, undefined);
+    });
+
+    it('should skip devices whose serial descriptor cannot be read', async () => {
+        const inaccessibleDevice = createFakeDevice({
+            vendorId: 0x0001,
+            productId: 0x0001,
+            serialError: new Error('open error: permission denied (errno 13)'),
+        });
+        const accessibleDevice = createFakeDevice({
+            vendorId: 0x0002,
+            productId: 0x0002,
+            serialNumber: 'ACCESSIBLE_DEVICE',
+        });
+        const customWebusb = new WebUSB();
+
+        customWebusb.loadDevices = async () => [inaccessibleDevice, accessibleDevice];
+
+        const device = await customWebusb.requestDevice({ filters: [] });
+        assert.equal(device, accessibleDevice);
+        assert.deepEqual(await customWebusb.getDevices(), [accessibleDevice]);
     });
 });
 
