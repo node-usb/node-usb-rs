@@ -8,8 +8,9 @@ if (typeof gc === 'function') {
     afterEach(() => gc());
 }
 
-function createFakeDevice({ vendorId, productId, serialNumber, serialError, openError, handle }) {
+function createFakeDevice({ vendorId, productId, serialNumber, serialError, openError, handle, deviceClass = 0 }) {
     let opened = false;
+    let openCalls = 0;
 
     return {
         vendorId,
@@ -17,14 +18,19 @@ function createFakeDevice({ vendorId, productId, serialNumber, serialError, open
         manufacturerName: null,
         productName: null,
         configurations: [],
-        deviceClass: 0,
+        deviceClass,
         deviceSubclass: 0,
         deviceProtocol: 0,
         handle: handle || `${vendorId}:${productId}:${serialNumber || ''}`,
         get opened() {
             return opened;
         },
+        get openCalls() {
+            return openCalls;
+        },
         async open() {
+            openCalls++;
+
             if (openError) {
                 throw openError;
             }
@@ -134,14 +140,17 @@ describe('requestDevice', () => {
         const device = await customWebusb.requestDevice({ filters: [] });
         assert.equal(device, accessibleDevice);
         assert.deepEqual(await customWebusb.getDevices(), [accessibleDevice]);
+        assert.equal(inaccessibleDevice.openCalls, 0);
+        assert.equal(accessibleDevice.openCalls, 0);
     });
 
-    it('should skip devices that cannot be opened for initialization', async () => {
-        const inaccessibleDevice = createFakeDevice({
+    it('should skip protected class devices without opening them', async () => {
+        const protectedDevice = createFakeDevice({
             vendorId: 0x0001,
             productId: 0x0001,
+            deviceClass: 0x09,
             openError: new Error('open error: permission denied (errno 13)'),
-            handle: 'inaccessible',
+            handle: 'protected',
         });
         const accessibleDevice = createFakeDevice({
             vendorId: 0x0002,
@@ -151,11 +160,13 @@ describe('requestDevice', () => {
         });
         const customWebusb = new WebUSB();
 
-        customWebusb.loadDevices = async () => [inaccessibleDevice, accessibleDevice];
+        customWebusb.loadDevices = async () => [protectedDevice, accessibleDevice];
 
         const device = await customWebusb.requestDevice({ filters: [] });
         assert.equal(device, accessibleDevice);
         assert.deepEqual(await customWebusb.getDevices(), [accessibleDevice]);
+        assert.equal(protectedDevice.openCalls, 0);
+        assert.equal(accessibleDevice.openCalls, 0);
     });
 
     it('should authorise only the selected device when matching devices have no serial numbers', async () => {
@@ -188,12 +199,13 @@ describe('getDevices', () => {
         assert.deepEqual(l[0], device);
     });
 
-    it('should skip devices that cannot be initialized when allowing all devices', async () => {
-        const inaccessibleDevice = createFakeDevice({
+    it('should skip protected class devices without opening when allowing all devices', async () => {
+        const protectedDevice = createFakeDevice({
             vendorId: 0x0001,
             productId: 0x0001,
+            deviceClass: 0x09,
             openError: new Error('open error: permission denied (errno 13)'),
-            handle: 'inaccessible',
+            handle: 'protected',
         });
         const accessibleDevice = createFakeDevice({
             vendorId: 0x0002,
@@ -203,9 +215,11 @@ describe('getDevices', () => {
         });
         const customWebusb = new WebUSB({ allowAllDevices: true });
 
-        customWebusb.loadDevices = async () => [inaccessibleDevice, accessibleDevice];
+        customWebusb.loadDevices = async () => [protectedDevice, accessibleDevice];
 
         assert.deepEqual(await customWebusb.getDevices(), [accessibleDevice]);
+        assert.equal(protectedDevice.openCalls, 0);
+        assert.equal(accessibleDevice.openCalls, 0);
     });
 });
 
