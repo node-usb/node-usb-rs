@@ -29,6 +29,33 @@ describe('WebUSB Module', () => {
     it('should describe basic constants', () => {
         assert.notEqual(webusb, undefined, 'webusb must be undefined');
     });
+
+    it('should not throw when the hotplug watcher cannot start', async () => {
+        const customWebusb = new WebUSB();
+        const listener = () => {};
+        const expectedError = new Error('watch devices error');
+        const warnings = [];
+        const originalWarn = console.warn;
+
+        customWebusb.nativeEmitter = {
+            addAttach: async () => { throw expectedError; },
+            addDetach: async () => {},
+            removeAttach: async () => {},
+            removeDetach: async () => {},
+        };
+
+        console.warn = (...args) => warnings.push(args);
+
+        try {
+            customWebusb.addEventListener('connect', listener);
+            await new Promise(resolve => setImmediate(resolve));
+
+            assert.ok(warnings.some(args => args[0] === 'usb: hotplug watcher error:' && args[1] === expectedError));
+        } finally {
+            customWebusb.removeEventListener('connect', listener);
+            console.warn = originalWarn;
+        }
+    });
 });
 
 describe('allowedDevices', () => {
