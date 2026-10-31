@@ -776,7 +776,7 @@ impl UsbDevice {
         Ok(())
     }
 
-    #[napi]
+    #[napi(js_name = "nativeForget")]
     pub async unsafe fn forget(&self) -> Result<()> {
         self.close().await
     }

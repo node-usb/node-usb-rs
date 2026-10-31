@@ -136,6 +136,19 @@ class ConnectionEvent extends Event implements USBConnectionEvent {
  */
 class WebUSB extends EventTarget implements USB {
 
+    private static instances = new Set<WebUSB>();
+
+    static {
+        UsbDevice.prototype.forget = async function (): Promise<void> {
+            await this.nativeForget();
+            WebUSB.forgetDeviceAuthorisation(this);
+        };
+    }
+
+    private static forgetDeviceAuthorisation(device: UsbDevice): void {
+        WebUSB.instances.forEach(instance => instance.removeAuthorisedDevice(device));
+    }
+
     protected nativeEmitter = new Emitter();
     protected authorisedDevices = new Set<USBDeviceFilter>();
     protected listenerCount = 0;
@@ -145,11 +158,29 @@ class WebUSB extends EventTarget implements USB {
 
     constructor(private options: USBOptions = {}) {
         super();
+        WebUSB.instances.add(this);
+    }
+
+    private matchAuthorised(authorised: USBDeviceFilter, device: UsbDevice): boolean {
+        return authorised.vendorId === device.vendorId
+            && authorised.productId === device.productId
+            && authorised.classCode === device.deviceClass
+            && authorised.subclassCode === device.deviceSubclass
+            && authorised.protocolCode === device.deviceProtocol
+            && authorised.serialNumber === device.serialNumber;
+    }
+
+    private removeAuthorisedDevice(device: UsbDevice): void {
+        [...this.authorisedDevices.values()]
+            .filter(authorised =>
+                this.matchAuthorised(authorised, device)
+            )
+            .forEach(existing => this.authorisedDevices.delete(existing));
     }
 
     private queueNativeEmitterOperation(operation: () => Promise<void>): void {
         const pending = this.nativeEmitterQueue.then(operation);
-        this.nativeEmitterQueue = pending.catch(() => {});
+        this.nativeEmitterQueue = pending.catch(() => { });
         // A hotplug watcher that can't start (e.g. no netlink in a container) must
         // not crash the host process, so report it rather than rethrowing.
         pending.catch(error => console.warn('usb: hotplug watcher error:', error));
@@ -451,14 +482,7 @@ class WebUSB extends EventTarget implements USB {
         }
 
         // Check authorised devices
-        return [...this.authorisedDevices.values()].some(authorised =>
-            authorised.vendorId === device.vendorId
-            && authorised.productId === device.productId
-            && authorised.classCode === device.deviceClass
-            && authorised.subclassCode === device.deviceSubclass
-            && authorised.protocolCode === device.deviceProtocol
-            && authorised.serialNumber === device.serialNumber
-        );
+        return [...this.authorisedDevices.values()].some(authorised => this.matchAuthorised(authorised, device));
     }
 }
 
