@@ -7,6 +7,9 @@ const DEFAULT_TRANSFER_TIMEOUT = 0;
 const DEFAULT_CONTROL_TRANSFER_TIMEOUT = 1000;
 const DEFAULT_ISOCHRONOUS_TRANSFER_TIMEOUT = 1000;
 
+/**
+ * Hidden
+ */
 const PROTECTED_DEVICE_CLASSES = new Set<number>([
     0x01, // Audio
     0x03, // HID
