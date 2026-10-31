@@ -163,25 +163,24 @@ impl Drop for Emitter {
     }
 }
 
-async fn list_devices(error_prefix: &'static str) -> Result<Vec<nusb::DeviceInfo>> {
+async fn list_devices() -> Result<Vec<nusb::DeviceInfo>> {
     run_blocking(move || {
-        nusb::list_devices()
+        Ok(nusb::list_devices()
             .wait()
-            .map(|devices| devices.collect::<Vec<_>>())
-            .map_err(|e| format!("{error_prefix} error: {e}"))
+            .map_or(Vec::new(), |devices| devices.collect::<Vec<_>>()))
     })
     .await
 }
 
 #[napi(js_name = "nativeGetDevices")]
 pub async fn getDevices() -> Result<Vec<UsbDevice>> {
-    let devices = list_devices("getDevices").await?;
+    let devices = list_devices().await?;
     Ok(devices.into_iter().map(UsbDevice::new).collect())
 }
 
 #[napi(js_name = "nativeFindDeviceByIds")]
 pub async fn findDeviceByIds(vendorId: u16, productId: u16) -> Result<Option<UsbDevice>> {
-    let device = list_devices("findDeviceByIds")
+    let device = list_devices()
         .await?
         .into_iter()
         .find(|dev| dev.vendor_id() == vendorId && dev.product_id() == productId);
@@ -190,7 +189,7 @@ pub async fn findDeviceByIds(vendorId: u16, productId: u16) -> Result<Option<Usb
 
 #[napi(js_name = "nativeFindDeviceBySerial")]
 pub async fn findDeviceBySerial(serialNumber: String) -> Result<Option<UsbDevice>> {
-    let device = list_devices("findDeviceBySerial")
+    let device = list_devices()
         .await?
         .into_iter()
         .find(|dev| dev.serial_number() == Some(serialNumber.as_str()));
