@@ -10,6 +10,20 @@ const DEFAULT_ISOCHRONOUS_TRANSFER_TIMEOUT = 1000;
 /**
  * Hidden
  */
+const PROTECTED_DEVICE_CLASSES = new Set<number>([
+    0x01, // Audio
+    0x03, // HID
+    0x08, // Mass Storage
+    0x09, // Hub
+    0x0b, // Smart Card
+    0x0e, // Video
+    0x10, // Audio/Video
+    0xe0, // Wireless Controller
+]);
+
+/**
+ * Hidden
+ */
 const toUint8Array = (data: BufferSource): Uint8Array => {
     if (data instanceof ArrayBuffer) {
         return new Uint8Array(data);
@@ -137,7 +151,8 @@ class ConnectionEvent extends Event implements USBConnectionEvent {
 class WebUSB extends EventTarget implements USB {
 
     protected nativeEmitter = new Emitter();
-    protected authorisedDevices = new Set<USBDeviceFilter>();
+    protected authorisedDeviceHandles = new Set<string>();
+    protected authorisedDeviceFilters = new Set<USBDeviceFilter>();
     protected listenerCount = 0;
     protected eventListeners = new Map<string, Set<EventListener>>();
     protected knownDevices: Map<string, UsbDevice> = new Map();
@@ -156,6 +171,10 @@ class WebUSB extends EventTarget implements USB {
     }
 
     private deviceConnectCallback = async (device: UsbDevice) => {
+        if (this.isPotentialSystemDevice(device)) {
+            return;
+        }
+
         this.knownDevices.set(device.handle, device);
 
         // When connected, emit an event if it is an allowed device
@@ -198,8 +217,12 @@ class WebUSB extends EventTarget implements USB {
                 await this.nativeEmitter.addAttach(this.deviceConnectCallback);
                 await this.nativeEmitter.addDetach(this.deviceDisconnectCallback);
             });
+
             nativeGetDevices()
-                .then(devices => devices.forEach(device => this.knownDevices.set(device.handle, device)))
+                .then(devices => {
+                    this.filterListableDevices(devices)
+                        .forEach(device => this.knownDevices.set(device.handle, device));
+                })
                 .catch(error => console.warn('usb: failed to list devices for hotplug:', error));
         }
     }
@@ -297,30 +320,28 @@ class WebUSB extends EventTarget implements USB {
             }
         });
 
-        let devices = await this.loadDevices(options.filters);
+        let devices = this.filterListableDevices(await this.loadDevices(options.filters));
         devices = devices.filter(device => this.filterDevice(device, options.filters));
 
         if (devices.length === 0) {
             throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
         }
 
-        // If no devicesFound function, select the first device found
-        const device = this.options.devicesFound ? await this.options.devicesFound(devices) : devices[0];
+        if (this.options.devicesFound) {
+            const device = await this.options.devicesFound(devices);
 
-        if (!device) {
-            throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
+            if (device && this.authoriseDevice(device)) {
+                return device;
+            }
+        } else {
+            for (const device of devices) {
+                if (this.authoriseDevice(device)) {
+                    return device;
+                }
+            }
         }
 
-        this.authorisedDevices.add({
-            vendorId: device.vendorId,
-            productId: device.productId,
-            classCode: device.deviceClass,
-            subclassCode: device.deviceSubclass,
-            protocolCode: device.deviceProtocol,
-            serialNumber: device.serialNumber || undefined
-        });
-
-        return device;
+        throw new NamedError('Failed to execute \'requestDevice\' on \'USB\': No device selected.', 'NotFoundError');
     }
 
     /**
@@ -331,7 +352,7 @@ class WebUSB extends EventTarget implements USB {
         const preFilters = this.options.allowAllDevices ? undefined : this.options.allowedDevices;
 
         // Refresh devices and filter for allowed ones
-        const devices = await this.loadDevices(preFilters);
+        const devices = this.filterListableDevices(await this.loadDevices(preFilters));
 
         return devices.filter(device => this.isAuthorisedDevice(device));
     }
@@ -363,6 +384,40 @@ class WebUSB extends EventTarget implements USB {
         return devices;
     }
 
+    private filterListableDevices(devices: UsbDevice[]): UsbDevice[] {
+        return devices.filter(device => !this.isPotentialSystemDevice(device));
+    }
+
+    private isPotentialSystemDevice(device: UsbDevice): boolean {
+        return PROTECTED_DEVICE_CLASSES.has(device.deviceClass);
+    }
+
+    private authoriseDevice(device: UsbDevice): boolean {
+        let serialNumber: string | null = null;
+
+        try {
+            serialNumber = device.serialNumber;
+        } catch {
+            // Ignore devices that cannot expose their identifying descriptors, such as protected system devices.
+            return false;
+        }
+
+        this.authorisedDeviceHandles.add(device.handle);
+
+        if (serialNumber) {
+            this.authorisedDeviceFilters.add({
+                vendorId: device.vendorId,
+                productId: device.productId,
+                classCode: device.deviceClass,
+                subclassCode: device.deviceSubclass,
+                protocolCode: device.deviceProtocol,
+                serialNumber
+            });
+        }
+
+        return true;
+    }
+
     // Undertake quick filter on devices before creating WebUSB devices if possible
     private quickFilter(devices: UsbDevice[], preFilters?: USBDeviceFilter[]): UsbDevice[] {
         if (!preFilters || !preFilters.length) {
@@ -384,57 +439,61 @@ class WebUSB extends EventTarget implements USB {
     }
 
     // Filter WebUSB devices
-    private filterDevice(device: UsbDevice, filters?: USBDeviceFilter[]): boolean {
+    private filterDevice(device: UsbDevice, filters?: USBDeviceFilter[], checkInterfaces = true): boolean {
         if (!filters || !filters.length) {
             return true;
         }
 
         return filters.some(filter => {
-            // Vendor
-            if (filter.vendorId && filter.vendorId !== device.vendorId) return false;
+            try {
+                // Vendor
+                if (filter.vendorId && filter.vendorId !== device.vendorId) return false;
 
-            // Product
-            if (filter.productId && filter.productId !== device.productId) return false;
+                // Product
+                if (filter.productId && filter.productId !== device.productId) return false;
 
-            // Class
-            if (filter.classCode) {
+                // Class
+                if (filter.classCode && checkInterfaces) {
 
-                if (!device.configuration) {
-                    return false;
+                    if (!device.configuration) {
+                        return false;
+                    }
+
+                    // Interface Descriptors
+                    const match = device.configuration.interfaces.some(iface => {
+                        // Class
+                        if (filter.classCode && filter.classCode !== iface.alternate.interfaceClass) return false;
+
+                        // Subclass
+                        if (filter.subclassCode && filter.subclassCode !== iface.alternate.interfaceSubclass) return false;
+
+                        // Protocol
+                        if (filter.protocolCode && filter.protocolCode !== iface.alternate.interfaceProtocol) return false;
+
+                        return true;
+                    });
+
+                    if (match) {
+                        return true;
+                    }
                 }
 
-                // Interface Descriptors
-                const match = device.configuration.interfaces.some(iface => {
-                    // Class
-                    if (filter.classCode && filter.classCode !== iface.alternate.interfaceClass) return false;
+                // Class
+                if (filter.classCode && filter.classCode !== device.deviceClass) return false;
 
-                    // Subclass
-                    if (filter.subclassCode && filter.subclassCode !== iface.alternate.interfaceSubclass) return false;
+                // Subclass
+                if (filter.subclassCode && filter.subclassCode !== device.deviceSubclass) return false;
 
-                    // Protocol
-                    if (filter.protocolCode && filter.protocolCode !== iface.alternate.interfaceProtocol) return false;
+                // Protocol
+                if (filter.protocolCode && filter.protocolCode !== device.deviceProtocol) return false;
 
-                    return true;
-                });
+                // Serial
+                if (filter.serialNumber && filter.serialNumber !== device.serialNumber) return false;
 
-                if (match) {
-                    return true;
-                }
+                return true;
+            } catch {
+                return false;
             }
-
-            // Class
-            if (filter.classCode && filter.classCode !== device.deviceClass) return false;
-
-            // Subclass
-            if (filter.subclassCode && filter.subclassCode !== device.deviceSubclass) return false;
-
-            // Protocol
-            if (filter.protocolCode && filter.protocolCode !== device.deviceProtocol) return false;
-
-            // Serial
-            if (filter.serialNumber && filter.serialNumber !== device.serialNumber) return false;
-
-            return true;
         });
     }
 
@@ -446,19 +505,27 @@ class WebUSB extends EventTarget implements USB {
         }
 
         // Check any allowed device filters
-        if (this.options.allowedDevices && this.filterDevice(device, this.options.allowedDevices)) {
+        if (this.options.allowedDevices && this.filterDevice(device, this.options.allowedDevices, false)) {
             return true;
         }
 
         // Check authorised devices
-        return [...this.authorisedDevices.values()].some(authorised =>
-            authorised.vendorId === device.vendorId
-            && authorised.productId === device.productId
-            && authorised.classCode === device.deviceClass
-            && authorised.subclassCode === device.deviceSubclass
-            && authorised.protocolCode === device.deviceProtocol
-            && authorised.serialNumber === device.serialNumber
-        );
+        if (this.authorisedDeviceHandles.has(device.handle)) {
+            return true;
+        }
+
+        return [...this.authorisedDeviceFilters.values()].some(authorised => {
+            try {
+                return authorised.vendorId === device.vendorId
+                    && authorised.productId === device.productId
+                    && authorised.classCode === device.deviceClass
+                    && authorised.subclassCode === device.deviceSubclass
+                    && authorised.protocolCode === device.deviceProtocol
+                    && authorised.serialNumber === device.serialNumber;
+            } catch {
+                return false;
+            }
+        });
     }
 }
 
