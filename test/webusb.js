@@ -120,6 +120,45 @@ describe('requestDevice', () => {
         assert.notEqual(device, undefined);
     });
 
+    it('should match class filters against all interface alternates', async () => {
+        const deviceMulti = createFakeDevice({
+            vendorId: 0x0001,
+            productId: 0x0001,
+            serialNumber: 'ALTERNATE_DEVICE',
+            handle: 'alternate',
+        });
+        deviceMulti.configurations = [{
+            interfaces: [{
+                alternates: [{
+                    interfaceClass: 0xff,
+                    interfaceSubclass: 0xff,
+                    interfaceProtocol: 0xff,
+                }],
+            }],
+        }, {
+            interfaces: [{
+                alternates: [{
+                    interfaceClass: 0xff,
+                    interfaceSubclass: 0xff,
+                    interfaceProtocol: 0xff,
+                }, {
+                    interfaceClass: 0x07,
+                    interfaceSubclass: 0x01,
+                    interfaceProtocol: 0x04,
+                }],
+            }],
+        }];
+        deviceMulti.configuration = deviceMulti.configurations[0];
+        const customWebusb = new WebUSB();
+
+        customWebusb.loadDevices = async () => [deviceMulti];
+
+        const device = await customWebusb.requestDevice({
+            filters: [{ classCode: 0x07, subclassCode: 0x01, protocolCode: 0x04 }],
+        });
+        assert.equal(device, deviceMulti);
+    });
+
     it('should skip devices whose serial descriptor cannot be read', async () => {
         const inaccessibleDevice = createFakeDevice({
             vendorId: 0x0001,

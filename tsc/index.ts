@@ -454,24 +454,21 @@ class WebUSB extends EventTarget implements USB {
 
                 // Class
                 if (filter.classCode && checkInterfaces) {
-
-                    if (!device.configuration) {
-                        return false;
-                    }
-
                     // Interface Descriptors
-                    const match = device.configuration.interfaces.some(iface => {
-                        // Class
-                        if (filter.classCode && filter.classCode !== iface.alternate.interfaceClass) return false;
+                    const match = device.configurations.some(config =>
+                        config.interfaces.some(iface => iface.alternates.some(alter => {
+                            // Class
+                            if (filter.classCode && filter.classCode !== alter.interfaceClass) return false;
 
-                        // Subclass
-                        if (filter.subclassCode && filter.subclassCode !== iface.alternate.interfaceSubclass) return false;
+                            // Subclass
+                            if (filter.subclassCode && filter.subclassCode !== alter.interfaceSubclass) return false;
 
-                        // Protocol
-                        if (filter.protocolCode && filter.protocolCode !== iface.alternate.interfaceProtocol) return false;
+                            // Protocol
+                            if (filter.protocolCode && filter.protocolCode !== alter.interfaceProtocol) return false;
 
-                        return true;
-                    });
+                            return true;
+                        }))
+                    );
 
                     if (match) {
                         return true;
