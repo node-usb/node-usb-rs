@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.3.0] - 2026-11-08
+
+### Changed
+- Updated napi to v3.16.0 - [`105`](https://github.com/node-usb/node-usb-rs/pull/105) ([Rob Moran](https://github.com/thegecko))
+- Updated nusb to v0.2.9 - [`106`](https://github.com/node-usb/node-usb-rs/pull/106) ([Rob Moran](https://github.com/thegecko))
+
+### Fixed
+- Fix filtering devices with multiple alternates - [`110`](https://github.com/node-usb/node-usb-rs/pull/110) ([Gonçalo MB](https://github.com/goncalomb))
+- Don't fail or crash when the USB bus is missing - [`104`](https://github.com/node-usb/node-usb-rs/pull/104) ([Julian Waller](https://github.com/Julusian))
+- Skip devices with unreadable descriptors - [`96`](https://github.com/node-usb/node-usb-rs/pull/96) ([Rob Moran](https://github.com/thegecko))
+- Use nusb getters for device strings - [`86`](https://github.com/node-usb/node-usb-rs/pull/86) ([Rob Moran](https://github.com/thegecko))
+- Fix active transfer close and release cleanup - [`85`](https://github.com/node-usb/node-usb-rs/pull/85) ([Rob Moran](https://github.com/thegecko))
+- Fix transfer default timeout handling - [`84`](https://github.com/node-usb/node-usb-rs/pull/84) ([Rob Moran](https://github.com/thegecko))
+- Fix endpoint transfer waits blocking pool starvation - [`83`](https://github.com/node-usb/node-usb-rs/pull/83) ([Rob Moran](https://github.com/thegecko))
+- Fix controlTransferOut without data argument - [`82`](https://github.com/node-usb/node-usb-rs/pull/82) ([Rob Moran](https://github.com/thegecko))
+
 ## [3.2.1] - 2026-10-04
 
 ### Changed
