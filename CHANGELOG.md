@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.3.1] - 2026-11-18
+
+### Changed
+- Removed unsafe and mutable fields - [`118`](https://github.com/node-usb/node-usb-rs/pull/118) ([Rob Moran](https://github.com/thegecko))
+- Updated napi to v3.16.1 - [`116`](https://github.com/node-usb/node-usb-rs/pull/116) ([Rob Moran](https://github.com/thegecko))
+
 ## [3.3.0] - 2026-11-08
 
 ### Changed
