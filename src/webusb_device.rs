@@ -597,38 +597,23 @@ pub struct UsbDevice {
     in_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::In>>,
     out_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::Out>>,
 
-    #[napi(writable = false)]
-    pub vendorId: u16,
-    #[napi(writable = false)]
-    pub productId: u16,
-    #[napi(writable = false)]
-    pub deviceVersionMajor: u8,
-    #[napi(writable = false)]
-    pub deviceVersionMinor: u8,
-    #[napi(writable = false)]
-    pub deviceVersionSubminor: u8,
-    #[napi(writable = false)]
-    pub usbVersionMajor: u8,
-    #[napi(writable = false)]
-    pub usbVersionMinor: u8,
-    #[napi(writable = false)]
-    pub usbVersionSubminor: u8,
-    #[napi(writable = false)]
-    pub deviceClass: u8,
-    #[napi(writable = false)]
-    pub deviceSubclass: u8,
-    #[napi(writable = false)]
-    pub deviceProtocol: u8,
+    vendorId: u16,
+    productId: u16,
+    deviceVersionMajor: u8,
+    deviceVersionMinor: u8,
+    deviceVersionSubminor: u8,
+    usbVersionMajor: u8,
+    usbVersionMinor: u8,
+    usbVersionSubminor: u8,
+    deviceClass: u8,
+    deviceSubclass: u8,
+    deviceProtocol: u8,
 
     // Non WebUSB props
-    #[napi(writable = false)]
-    pub bus: String,
-    #[napi(writable = false)]
-    pub address: u8,
-    #[napi(writable = false)]
-    pub ports: Vec<u8>,
-    #[napi(writable = false, ts_type = "USBSpeed")]
-    pub speed: Option<String>,
+    bus: String,
+    address: u8,
+    ports: Vec<u8>,
+    speed: Option<String>,
 }
 
 #[napi]
@@ -691,7 +676,82 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn manufacturerName(&mut self) -> Result<Option<String>> {
+    pub fn vendorId(&self) -> u16 {
+        self.vendorId
+    }
+
+    #[napi(getter)]
+    pub fn productId(&self) -> u16 {
+        self.productId
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionMajor(&self) -> u8 {
+        self.deviceVersionMajor
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionMinor(&self) -> u8 {
+        self.deviceVersionMinor
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionSubminor(&self) -> u8 {
+        self.deviceVersionSubminor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionMajor(&self) -> u8 {
+        self.usbVersionMajor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionMinor(&self) -> u8 {
+        self.usbVersionMinor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionSubminor(&self) -> u8 {
+        self.usbVersionSubminor
+    }
+
+    #[napi(getter)]
+    pub fn deviceClass(&self) -> u8 {
+        self.deviceClass
+    }
+
+    #[napi(getter)]
+    pub fn deviceSubclass(&self) -> u8 {
+        self.deviceSubclass
+    }
+
+    #[napi(getter)]
+    pub fn deviceProtocol(&self) -> u8 {
+        self.deviceProtocol
+    }
+
+    #[napi(getter)]
+    pub fn bus(&self) -> String {
+        self.bus.clone()
+    }
+
+    #[napi(getter)]
+    pub fn address(&self) -> u8 {
+        self.address
+    }
+
+    #[napi(getter)]
+    pub fn ports(&self) -> Vec<u8> {
+        self.ports.clone()
+    }
+
+    #[napi(getter, ts_return_type = "USBSpeed")]
+    pub fn speed(&self) -> Option<String> {
+        self.speed.clone()
+    }
+
+    #[napi(getter)]
+    pub fn manufacturerName(&self) -> Result<Option<String>> {
         self.device_info
             .get_manufacturer_string()
             .wait()
@@ -699,7 +759,7 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn productName(&mut self) -> Result<Option<String>> {
+    pub fn productName(&self) -> Result<Option<String>> {
         self.device_info
             .get_product_string()
             .wait()
@@ -707,7 +767,7 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn serialNumber(&mut self) -> Result<Option<String>> {
+    pub fn serialNumber(&self) -> Result<Option<String>> {
         self.device_info
             .get_serial_number_string()
             .wait()
@@ -720,7 +780,7 @@ impl UsbDevice {
     }
 
     #[napi(getter, ts_return_type = "USBConfiguration")]
-    pub unsafe fn configuration(&mut self) -> Result<Option<UsbConfiguration>> {
+    pub fn configuration(&self) -> Result<Option<UsbConfiguration>> {
         let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
@@ -734,7 +794,7 @@ impl UsbDevice {
     }
 
     #[napi(getter, ts_return_type = "Array<USBConfiguration>")]
-    pub unsafe fn configurations(&mut self) -> Result<Vec<UsbConfiguration>> {
+    pub fn configurations(&self) -> Result<Vec<UsbConfiguration>> {
         let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
@@ -746,7 +806,7 @@ impl UsbDevice {
             .collect::<Result<Vec<_>>>()
     }
 
-    unsafe fn _open(&self) -> Result<nusb::Device> {
+    fn _open(&self) -> Result<nusb::Device> {
         self.device_info
             .open()
             .wait()
@@ -754,7 +814,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn open(&mut self) -> Result<()> {
+    pub async fn open(&self) -> Result<()> {
         self.clear_endpoint_caches();
         let device_info = self.device_info.clone();
         let device = run_blocking(move || {
@@ -769,7 +829,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn close(&self) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
         self.clear_endpoint_caches();
         self.interfaces_guard().fill(None);
         *self.device_guard() = None;
@@ -777,7 +837,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn forget(&self) -> Result<()> {
+    pub async fn forget(&self) -> Result<()> {
         self.close().await
     }
 
@@ -841,7 +901,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn claimInterface(&mut self, interfaceNumber: u8) -> Result<()> {
+    pub async fn claimInterface(&self, interfaceNumber: u8) -> Result<()> {
         let device = self.device_guard().clone();
         match device {
             Some(device) => {
@@ -862,7 +922,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn releaseInterface(&self, interfaceNumber: u8) -> Result<()> {
+    pub async fn releaseInterface(&self, interfaceNumber: u8) -> Result<()> {
         if self.device_guard().is_none() {
             return Err(napi::Error::from_reason(
                 "releaseInterface error: invalid state",
@@ -881,8 +941,8 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn selectAlternateInterface(
-        &mut self,
+    pub async fn selectAlternateInterface(
+        &self,
         interfaceNumber: u8,
         alternateSetting: u8,
     ) -> Result<()> {

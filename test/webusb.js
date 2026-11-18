@@ -607,17 +607,19 @@ describe('Active Transfer Cleanup', () => {
     it('should close while transfer IN is active', async () => {
         const device = await openClaimedDevice();
         const transfer = device.transferIn(3, 64, 60000);
+        const transferRejection = assert.rejects(transfer);
 
         await assert.doesNotReject(device.close());
-        await assert.rejects(transfer);
+        await transferRejection;
     });
 
     it('should release interface while transfer IN is active', async () => {
         const device = await openClaimedDevice();
         const transfer = device.transferIn(3, 64, 60000);
+        const transferRejection = assert.rejects(transfer);
 
         await assert.doesNotReject(device.releaseInterface(0));
-        await assert.rejects(transfer);
+        await transferRejection;
         await device.close();
     });
 });
