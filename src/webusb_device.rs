@@ -691,7 +691,7 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn manufacturerName(&mut self) -> Result<Option<String>> {
+    pub fn manufacturerName(&self) -> Result<Option<String>> {
         self.device_info
             .get_manufacturer_string()
             .wait()
@@ -699,7 +699,7 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn productName(&mut self) -> Result<Option<String>> {
+    pub fn productName(&self) -> Result<Option<String>> {
         self.device_info
             .get_product_string()
             .wait()
@@ -707,7 +707,7 @@ impl UsbDevice {
     }
 
     #[napi(getter)]
-    pub unsafe fn serialNumber(&mut self) -> Result<Option<String>> {
+    pub fn serialNumber(&self) -> Result<Option<String>> {
         self.device_info
             .get_serial_number_string()
             .wait()
@@ -720,7 +720,7 @@ impl UsbDevice {
     }
 
     #[napi(getter, ts_return_type = "USBConfiguration")]
-    pub unsafe fn configuration(&mut self) -> Result<Option<UsbConfiguration>> {
+    pub fn configuration(&self) -> Result<Option<UsbConfiguration>> {
         let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
@@ -734,7 +734,7 @@ impl UsbDevice {
     }
 
     #[napi(getter, ts_return_type = "Array<USBConfiguration>")]
-    pub unsafe fn configurations(&mut self) -> Result<Vec<UsbConfiguration>> {
+    pub fn configurations(&self) -> Result<Vec<UsbConfiguration>> {
         let device = match self.device_guard().as_ref() {
             Some(device) => device.clone(),
             None => self._open()?,
@@ -746,7 +746,7 @@ impl UsbDevice {
             .collect::<Result<Vec<_>>>()
     }
 
-    unsafe fn _open(&self) -> Result<nusb::Device> {
+    fn _open(&self) -> Result<nusb::Device> {
         self.device_info
             .open()
             .wait()
@@ -754,7 +754,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn open(&mut self) -> Result<()> {
+    pub async fn open(&self) -> Result<()> {
         self.clear_endpoint_caches();
         let device_info = self.device_info.clone();
         let device = run_blocking(move || {
@@ -769,7 +769,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn close(&self) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
         self.clear_endpoint_caches();
         self.interfaces_guard().fill(None);
         *self.device_guard() = None;
@@ -777,7 +777,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn forget(&self) -> Result<()> {
+    pub async fn forget(&self) -> Result<()> {
         self.close().await
     }
 
@@ -841,7 +841,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn claimInterface(&mut self, interfaceNumber: u8) -> Result<()> {
+    pub async fn claimInterface(&self, interfaceNumber: u8) -> Result<()> {
         let device = self.device_guard().clone();
         match device {
             Some(device) => {
@@ -862,7 +862,7 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn releaseInterface(&self, interfaceNumber: u8) -> Result<()> {
+    pub async fn releaseInterface(&self, interfaceNumber: u8) -> Result<()> {
         if self.device_guard().is_none() {
             return Err(napi::Error::from_reason(
                 "releaseInterface error: invalid state",
@@ -881,8 +881,8 @@ impl UsbDevice {
     }
 
     #[napi]
-    pub async unsafe fn selectAlternateInterface(
-        &mut self,
+    pub async fn selectAlternateInterface(
+        &self,
         interfaceNumber: u8,
         alternateSetting: u8,
     ) -> Result<()> {
