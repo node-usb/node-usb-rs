@@ -597,38 +597,23 @@ pub struct UsbDevice {
     in_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::In>>,
     out_endpoints: SharedEndpointCache<EndpointWorker<nusb::transfer::Out>>,
 
-    #[napi(writable = false)]
-    pub vendorId: u16,
-    #[napi(writable = false)]
-    pub productId: u16,
-    #[napi(writable = false)]
-    pub deviceVersionMajor: u8,
-    #[napi(writable = false)]
-    pub deviceVersionMinor: u8,
-    #[napi(writable = false)]
-    pub deviceVersionSubminor: u8,
-    #[napi(writable = false)]
-    pub usbVersionMajor: u8,
-    #[napi(writable = false)]
-    pub usbVersionMinor: u8,
-    #[napi(writable = false)]
-    pub usbVersionSubminor: u8,
-    #[napi(writable = false)]
-    pub deviceClass: u8,
-    #[napi(writable = false)]
-    pub deviceSubclass: u8,
-    #[napi(writable = false)]
-    pub deviceProtocol: u8,
+    vendorId: u16,
+    productId: u16,
+    deviceVersionMajor: u8,
+    deviceVersionMinor: u8,
+    deviceVersionSubminor: u8,
+    usbVersionMajor: u8,
+    usbVersionMinor: u8,
+    usbVersionSubminor: u8,
+    deviceClass: u8,
+    deviceSubclass: u8,
+    deviceProtocol: u8,
 
     // Non WebUSB props
-    #[napi(writable = false)]
-    pub bus: String,
-    #[napi(writable = false)]
-    pub address: u8,
-    #[napi(writable = false)]
-    pub ports: Vec<u8>,
-    #[napi(writable = false, ts_type = "USBSpeed")]
-    pub speed: Option<String>,
+    bus: String,
+    address: u8,
+    ports: Vec<u8>,
+    speed: Option<String>,
 }
 
 #[napi]
@@ -688,6 +673,81 @@ impl UsbDevice {
     #[napi(getter)]
     pub fn handle(&self) -> String {
         format!("{:?}", self.device_info.id())
+    }
+
+    #[napi(getter)]
+    pub fn vendorId(&self) -> u16 {
+        self.vendorId
+    }
+
+    #[napi(getter)]
+    pub fn productId(&self) -> u16 {
+        self.productId
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionMajor(&self) -> u8 {
+        self.deviceVersionMajor
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionMinor(&self) -> u8 {
+        self.deviceVersionMinor
+    }
+
+    #[napi(getter)]
+    pub fn deviceVersionSubminor(&self) -> u8 {
+        self.deviceVersionSubminor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionMajor(&self) -> u8 {
+        self.usbVersionMajor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionMinor(&self) -> u8 {
+        self.usbVersionMinor
+    }
+
+    #[napi(getter)]
+    pub fn usbVersionSubminor(&self) -> u8 {
+        self.usbVersionSubminor
+    }
+
+    #[napi(getter)]
+    pub fn deviceClass(&self) -> u8 {
+        self.deviceClass
+    }
+
+    #[napi(getter)]
+    pub fn deviceSubclass(&self) -> u8 {
+        self.deviceSubclass
+    }
+
+    #[napi(getter)]
+    pub fn deviceProtocol(&self) -> u8 {
+        self.deviceProtocol
+    }
+
+    #[napi(getter)]
+    pub fn bus(&self) -> String {
+        self.bus.clone()
+    }
+
+    #[napi(getter)]
+    pub fn address(&self) -> u8 {
+        self.address
+    }
+
+    #[napi(getter)]
+    pub fn ports(&self) -> Vec<u8> {
+        self.ports.clone()
+    }
+
+    #[napi(getter, ts_return_type = "USBSpeed")]
+    pub fn speed(&self) -> Option<String> {
+        self.speed.clone()
     }
 
     #[napi(getter)]
